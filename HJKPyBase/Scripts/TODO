@@ -1,0 +1,33 @@
+TODO:
+1) Check for charge and remove
+2) Check for missed counterions and remove
+3) Figure out what to do if some structures have bad geometry and others don't - maybe generate all five geoms first and only run calc if all 5 geoms can get generated w/o any forcing?
+4) Cleaner/better setup.pkl/etc logging/structure.
+
+
+log: generated successfully? set up to queue (and job nums, directory, did it finish?)
+logging:
+write the reg #, the smiles(?), the jobids, poll the output when a job finishes/and or if the job gets killed is there a trigger/way to capture that outcome?
+-Log should have job id when the job is submitted, 
+-Log should have outcome of job - did it finish, did scf not converge, did it crash, did it run out of time? Maybe that's a separate logfile, or even one pickle per ligand directory?
+
+want to change to 2gpus if the job is big enough? #atoms not big enough now.
+
+
+TODO!!! Get a logging system set up
+DONE: (but could be cleaner): Get adam's stuff working with mine
+DONE: Get a sanity check on structures before they run -warns for anomalous distances
+TBD: Recording alignment results, not just to screen
+
+Adam stuff:
+ --dbquery picklefile.pkl --dbnum $num;
+that should be the pkl file in ~/Instruct/Py/Pickles
+number is optional and specifies which line of dictionary to use.
+
+Otherwise should use one, write to log, check if written to log.
+should also have option to override and specify reg #.
+
+
+Other: Calculate just optimized/unoptimized ligand energy to get estimate of total ligand binding energy? Only relevant for cases where the ligands might not want to bind...maybe that's never.
+
+Todo: Find cases where adam's thing failed. - one with kekulizing for saving to file, one with idx being referenced before it was defined(?) maybe atoms messedup/missing.
