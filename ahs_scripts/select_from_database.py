@@ -9,6 +9,7 @@ from rdkit.Chem import AllChem
 from rdkit.Chem import DataStructs
 from rdkit.Chem import SaltRemover
 from rdkit.Chem import PandasTools
+from rdkit.Chem import FunctionalGroups
 
 import psycopg2
 import pandas
@@ -187,7 +188,7 @@ def output_grid(df,imagename):
 
 if __name__=='__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("-g", "--group", help="Functional group to search for in the database",default='both')
+    parser.add_argument("-g", "--group", help="Functional group to search for in the database",default='CarboxylicAcid')
     parser.add_argument("-a", "--num_atoms", type=int,  
                     help="Maximum size of an molecule (in atoms) to be extracted from database",default=20)
     parser.add_argument("-c", "--halogens", action='store_true',  
@@ -208,14 +209,33 @@ if __name__=='__main__':
     args = parser.parse_args()
    
    #the functional groups are already coded into rdkit! TODO access these instead.
-    fgroup_smarts = {'carboxylate':'[CX3](=O)[O-]',
-                     'acid':'[CX3](=O)[OX2H1]',
-                     'both':'[CX3](=O)[OX1H0-,OX2H1]'}
-    
+   # fgroup_smarts = {'carboxylate':'[CX3](=O)[O-]',
+   #                  'acid':'[CX3](=O)[OX2H1]',
+   #                  'both':'[CX3](=O)[OX1H0-,OX2H1]'}
+   
+   #Code below replaces orginal functional group queries:
+    #CarboxylicAcid: C(=O)[O;H,-]
+    #Should check if this is equivalent to old "both"
+   
+    fgs = FunctionalGroups.BuildFuncGroupHierarchy()
+    from collections import namedtuple
+    nt = namedtuple('pattern','smarts mol')
+    def flattenFgs(fgs,res):
+        if not fgs:
+            return
+        for x in fgs:
+            res[x.label]=nt(x.smarts,x.pattern)
+            flattenFgs(x.children,res)
+    allFgDefs={}
+    flattenFgs(fgs,allFgDefs)
+
     try:
-        smartsq = fgroup_smarts[args.group]
+        smartsq = allFgDefs[args.group].smarts
+        print smartsq
+
     except KeyError,e :
-        print "I can search for 'carboxylate', 'acid', or 'both'. You entered {}".format(args.group)
+        print """I can search for {}. 
+                    You entered '{}'""".format(', '.join(allFgDefs.keys()), args.group)
         sys.exit(0) 
 
     df = query_database(args)
