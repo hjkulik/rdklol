@@ -48,6 +48,8 @@ class mol3D:
         # translates molecules by dx,dy,dz
         for atom in self.atoms:
             atom.translate(dxyz)
+    def GetAtom(self,idx):
+        return self.atoms[idx]
     def centermass(self):
         # calculates center of mass of molecule
         # initialize center of mass and mol mass
@@ -65,6 +67,12 @@ class mol3D:
         pmc[0] /= mmass
         pmc[1] /= mmass
         pmc[2] /= mmass
+        return pmc
+    def distance(self,mol):
+        # gets distance between 2 molecules (centers of mass)
+        cm0 = self.centermass()
+        cm1 = mol.centermass()
+        pmc = distance(cm0,cm1)
         return pmc
     def molsize(self):
         # calculates maximum distance between center of mass and atoms

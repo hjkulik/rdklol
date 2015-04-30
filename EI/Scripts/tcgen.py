@@ -8,6 +8,7 @@ import argparse
 import glob
 import sys
 import os
+import shutil
 import subprocess
 execfile('/usr/share/Modules/init/python.py') 
 
@@ -31,8 +32,8 @@ def tc_check(userinput):
     """
     modname=''
     if not userinput:
-      module('load','terachem/alpha')
-      modname='terachem/alpha'
+      module('load','terachem/timis')
+      modname='terachem/timis'
     else:
       if userinput[0] is not '/':
          if mybash('/usr/bin/modulecmd python avail %s' %(userinput)):
@@ -67,15 +68,15 @@ def tc_check(userinput):
        exit()
     return ld_extra,tc_exe,modname
 
-def job_check(userinput):
+def job_check(userinput,fdir):
     """ Checks for existence of a pdb/xyz file based on job file existing.
         Returns truncated jobname (e.g. for logging/queue script) and jobfile name.
     """
     if userinput:
        jobname=userinput
-       if glob.glob(jobname+'.xyz'):
+       if glob.glob(fdir+'/'+jobname+'.xyz'):
           jobfile=jobname+'.xyz'
-       elif glob.glob(jobname+'.pdb'):
+       elif glob.glob(fdir+'/'+jobname+'.pdb'):
           jobfile=jobname+'.pdb'
        else:
           print("No pdb/xyz file with prefix %s found! Try again." %(userinput))
@@ -92,38 +93,40 @@ def job_check(userinput):
        exit()
     return jobname,jobtrunc,jobfile
 
-def tcgen():
-    # Parse commandline arguments
-    parser= argparse.ArgumentParser()
-    parser.add_argument("-j","--job", help="prefix for pdb/xyz structure file and jobname.")
-    parser.add_argument("-m","--method", help="electronic structure approach for terachem job. Specify UHF/UDFT to enforce levelshifting and unrestricted calculation for OS singlets (default: b3lyp).")
-    parser.add_argument("-b","--basis", help="basis for terachem job (default: LACVP*).") 
-    parser.add_argument("-s","--spin", help="spin for system (default: singlet).")
-    parser.add_argument("-ch","--charge", help="charge for system (default: neutral).") 
-    parser.add_argument("-x","--extra", nargs="+", help="extra arguments in syntax tckeyword=value. suggestions: nstep (opt), maxit (scf), scf=diis+a, min_tolerance>4.5e-4/min_tolerance_e>1.0e-6, min_coordinates=cartesian, orbitalswrtfrq=<num>,multibasis=<basis file>.")
-    parser.add_argument("-tc","--terachem", help="full path to custom terachem installation.")
-    # TBD, could do groupings of smart keywords at some point - eg 'floppy' or 'mustconverge' but not for now.
-    args=parser.parse_args()
-    parser.parse_args()
+def tcgen(args,strfiles,lig):
+    jobdirs = []
     # Initialize the jobparams dictionary with mandatory/useful keywords.
     jobparams={'run': 'minimize',
            'timings': 'yes',
            'nstep': '1001', 
-           'min_method': 'bfgs', 
-           'min_init_hess': 'fischer-almlof',
            'min_tolerance': '4.5e-4',
            'min_tolerance_e': '1.0e-6',
-           'maxit': '150',
+           'min_coordinates':'cartesian',
+           'maxit': '500',
            'scrdir': './scr',
            'method': 'b3lyp',
            'basis': 'lacvps_ecp',
+           'dispersion': 'no',
            'spinmult': '1',
-           'charge': '0'}
+           'charge': '0',
+           'gpus': '1',
+            }
+    if (args.dispersion):
+	jobparams['dispersion']=args.dispersion
     # Overwrite plus add any new dictionary keys from commandline input.       
     # Check to make sure that $TeraChem is loaded/initialized:
-    ld_extra,tc_exe,modname=tc_check(args.terachem)
-    # Setting jobname for files + truncated name for queue.
-    jobname,jobtrunc,jobparams['coordinates']=job_check(args.job)
+    ld_extra,tc_exe,modname=tc_check(args.terachem)   
+    coordfs = []
+    for xyzf in strfiles:
+        ff = xyzf.rsplit('/',1)
+        # Setting jobname for files + truncated name for queue.
+        jobname,jobtrunc,jobparams['coordinates']=job_check(ff[1],ff[0])
+        if os.path.isdir(ff[0]+'/'+jobname):
+            shutil.rmtree(ff[0]+'/'+jobname)
+        os.mkdir(ff[0]+'/'+jobname) 
+        shutil.move(ff[0]+'/'+jobparams['coordinates'],ff[0]+'/'+jobname+'/'+jobparams['coordinates'])
+        jobdirs.append(ff[0]+'/'+jobname)
+        coordfs.append(jobparams['coordinates'])
     # Method parsing, does not check if a garbage method is used here:
     unrestricted=False
     if args.method:
@@ -152,7 +155,7 @@ def tcgen():
           jobparams['basis']=args.basis
        if 'ecp' in args.basis:
           ecp=True
-       if not glob.glob('%s/basis/%s' %(os.path.expandvars('$TeraChem'),basis)): 
+       if not glob.glob('%s/basis/%s' %(os.path.expandvars('$TeraChem'),args.basis)): 
           print("Basis %s does not exist. Try again!" %(args.basis))
           exit()
     # Overwrite plus add any new dictionary keys from commandline input.       
@@ -173,8 +176,12 @@ def tcgen():
        if not jobparams.has_key('levelshiftvalb'):
           jobparams['levelshiftvalb']='0.1'
     # Now we're ready to start building the input file and the job script
-    output=open(jobname+'.in','w')
-    for keys in jobparams.keys():
-        output.write('%s %s\n' %(keys,jobparams[keys]))
-    output.write('end\n')
-    output.close()
+    for i,jobd in enumerate(jobdirs):
+        output=open(jobd+'/terachem_input','w')
+        jobparams['coordinates'] = coordfs[i]
+        for keys in jobparams.keys():
+            output.write('%s %s\n' %(keys,jobparams[keys]))
+        output.write('nbo  advanced\n$nbo\nnlmo\n$end\n')
+        output.write('end\n')
+        output.close()
+    return jobdirs

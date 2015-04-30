@@ -15,7 +15,7 @@ Created on 12/20/14
 
 from math import sqrt 
 
-# atoms dictionary contains atomic mass, atomic number, covalent radius
+# atoms dictionary contains atomic mass, atomic number, covalent radius (URL!!!!)
 amass = {'H':(1.0079,1,0.37),'C':(12.0107,6,0.77),'N':(14.0067,7,0.75),'O':(15.9994,8,0.73),'F':(18.9984,9,0.71),
         'P':(30.9738,15,1.06),'S':(32.065,16,1.02),'Cl':(35.453,17,0.99),'Ti':(47.867,22,1.36),'Cr':(51.9961,24,1.27),
         'Mn':(54.938,25,1.39),'Fe':(55.84526,26,1.25),'Ni':(58.4934,28,1.21),'Co':(58.9332,27,1.26),
