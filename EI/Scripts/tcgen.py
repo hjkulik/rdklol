@@ -81,11 +81,8 @@ def job_check(userinput,fdir):
        else:
           print("No pdb/xyz file with prefix %s found! Try again." %(userinput))
           exit()
-       if len(jobname) > 8:
-          if '_' in jobname:
-             jobtrunc=userinput.split('_')[0][0:4]+userinput.split('_')[1][0:4]
-          else:
-             jobtrunc=userinput[0:8]
+       if len(jobname) > 10:
+            jobtrunc=userinput[0:6]+userinput[-4:]
        else:
           jobtrunc=jobname
     else:

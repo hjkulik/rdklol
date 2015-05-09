@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 import sys
+import copy
 import numpy as np
 from numpy import linalg as LA
-from math import pi ,sin, cos
+from math import pi ,sin, cos, sqrt
 from Classes.mol3D import mol3D
 from Classes.atom3D import atom3D
 
@@ -10,76 +11,142 @@ from Classes.atom3D import atom3D
 # Dpt of Chemical Engineering, MIT
 
 ##########################################################
-######## This script gets a set of atoms and #############
-########   rotates/translates the molecule   #############
-########  with respect to a point in space   #############
-########     in order increase the radial    #############
-########    distance between the center of   #############
-######## mass of the molecule and the point  #############
-######## and if requested rotates by polar   #############
-######## angle theta and azimuthal angle phi #############
-######## Furthermore, it rotates a molecule  #############
-######## around its own center of mass if    #############
-########   requested (x,y,z axes rotation)   #############
+############# This script performs a lot of ##############
+######### different operations and manipulates ###########
+################### atoms in 3D space ####################
 ##########################################################
 
-# INPUT for protate(Mol, Rr, Delta) or cmrotate(Mol, Delta)
-# Mol: contains atom types and coordinates
-# e.g.: mol =[['Fe',0.0,0.0,0.0],['C', -1.25700,       -0.18100,        1.59400],
-#    ['C',         -0.57900,        1.06300,        1.63700]]
-# Rr: coordinates of reference point for rotation/translation
-# Delta: if len(args)==3 contains D->R, Dtheta, Dphi for rotation translation around reference point (distance R, angle theta, angle phi)
-# Delta: if (len(args)==2 contains D->Dthetax, Dthetay, Dthetaz for rotation around center of mass
-# e.g. protate(Mol,[0.0 0.0 0.0],[2 45.0 90.0] translates 2A around  [0.0 0.0 0.0] and rotates by theta=45.0 and phi=90.0 
-# e.g cmrotate(Mol,[60.0 30.0 0.0]) rotates around center of mass and x-axis by thetax=60.0, y-axis thetay=30.0 and z thetaz=0.0
+def ReflectPlane(u,r,Rp):
+    #################################################
+    ####### contains roto-translation matrix ########
+    ####### for reflection of r through plane #######
+    ########## with normal u and point rp ###########
+    #################################################
+    # INPUT
+    #   - u: normal vector to plane [ux,uy,uz]
+    #   - Rp: reference point [x,y,z]
+    #   - r: point to be reflected [x,y,z]
+    # OUTPUT
+    #   - rn: reflected point [x,y,z]
+    un = LA.norm(u)
+    if (un > 1e-16):
+        u[0] = u[0]/un
+        u[1] = u[1]/un
+        u[2] = u[2]/un
+    # construct augmented vector rr = [r;1]
+    d = -u[0]*Rp[0]-u[1]*Rp[1]-u[2]*Rp[2]
+    # reflection matrix
+    R=[[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]]
+    rn = [0,0,0]
+    R[0][0] = 1-2*u[0]*u[0]
+    R[0][1] = -2*u[0]*u[1] 
+    R[0][2] = -2*u[0]*u[2] 
+    R[0][3] = -2*u[0]*d
+    R[1][0] = -2*u[1]*u[0] 
+    R[1][1] = 1-2*u[1]*u[1] 
+    R[1][2] = -2*u[1]*u[2] 
+    R[1][3] = -2*u[1]*d
+    R[2][0] = -2*u[2]*u[0]
+    R[2][1] = -2*u[1]*u[2]
+    R[2][2] = 1-2*u[2]*u[2] 
+    R[2][3] = -2*u[2]*d
+    R[3][3] = 1 
+    # get new point
+    rn[0] = R[0][0]*r[0]+R[0][1]*r[1]+R[0][2]*r[2] + R[0][3] 
+    rn[1] = R[1][0]*r[0]+R[1][1]*r[1]+R[1][2]*r[2] + R[1][3] 
+    rn[2] = R[2][0]*r[0]+R[2][1]*r[1]+R[2][2]*r[2] + R[2][3] 
+    return rn
 
-def translate_around_Rp(Mol,Pr,D):
-    # get center of mass
-    pmc = Mol.centermass()
-    # get translation vector that corresponds to new coords
-    Rt = PointTranslateSph(Pr,pmc,D)
-    # translate molecule
-    Mol.translate(Rt)
-    return Mol
+def PointRotateAxis(u,rp,r,theta):
+    #################################################
+    ####### contains roto-translation matrix ########
+    ######### for rotation of r about axis u ########
+    ######## through point rp by angle theta ########
+    #################################################
+    # INPUT
+    #   - u: direction vector of axis [ux,uy,uz]
+    #   - rp: reference point [x,y,z]
+    #   - r: point to be reflected [x,y,z]
+    #   - theta: angle of rotation in degrees
+    # OUTPUT
+    #   - rn: reflected point [x,y,z]
+    # construct augmented vector rr = [r;1]
+    rr = r
+    rr.append(1)
+    # rotation matrix about arbitrary line through rp
+    R=[[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]]
+    rn = [0,0,0]
+    R[0][0] = cos(theta)+u[0]**2*(1-cos(theta))
+    R[0][1] = u[0]*u[1]*(1-cos(theta))-u[2]*sin(theta)
+    R[0][2] = u[0]*u[2]*(1-cos(theta))+u[1]*sin(theta)
+    R[0][3] = (rp[0]*(u[1]**2+u[2]**2)-u[0]*(rp[1]*u[1]+rp[2]*u[2]))*(1-cos(theta))
+    R[0][3] += (rp[1]*u[2]-rp[2]*u[1])*sin(theta)
+    R[1][0] = u[1]*u[0]*(1-cos(theta))+u[2]*sin(theta)
+    R[1][1] = cos(theta)+u[1]**2*(1-cos(theta))
+    R[1][2] = u[1]*u[2]*(1-cos(theta))-u[0]*sin(theta)
+    R[1][3] = (rp[1]*(u[0]**2+u[2]**2)-u[1]*(rp[0]*u[0]+rp[2]*u[2]))*(1-cos(theta))
+    R[1][3] += (rp[2]*u[0]-rp[0]*u[2])*sin(theta)
+    R[2][0] = u[2]*u[0]*(1-cos(theta))-u[1]*sin(theta)
+    R[2][1] = u[2]*u[1]*(1-cos(theta))+u[0]*sin(theta)
+    R[2][2] = cos(theta)+u[2]**2*(1-cos(theta))
+    R[2][3] = (rp[2]*(u[0]**2+u[1]**2)-u[2]*(rp[0]*u[0]+rp[1]*u[1]))*(1-cos(theta))
+    R[2][3] += (rp[0]*u[1]-rp[1]*u[0])*sin(theta)
+    R[3][3] = 1
+    # get new point
+    rn[0] = R[0][0]*r[0]+R[0][1]*r[1]+R[0][2]*r[2] + R[0][3]
+    rn[1] = R[1][0]*r[0]+R[1][1]*r[1]+R[1][2]*r[2] + R[1][3]
+    rn[2] = R[2][0]*r[0]+R[2][1]*r[1]+R[2][2]*r[2] + R[2][3]
+    return rn
     
-def rotate_around_cm(Mol,D):
-    pmc = Mol.centermass()
-    for atom in Mol.atoms:
-        # Get new point after rotation
-        Rt = PointRotateSph(pmc,atom.coords(),D)
-        atom.set_coords(Rt)
-    return Mol
-
-def PointTranslateSph(Pr,p0,D):    
-    from math import cos, sin, sqrt 
+def PointTranslateSph(Rp,p0,D):    
+    ##################################################
+    ####### converts to spherical coordinates ########
+    ######### translates/rotates and converts ########
+    ################ back to cartesian ###############
+    ##################################################
+    # INPUT
+    #   - Rp: reference point [x,y,z]
+    #   - p0: point to be translated [x,y,z]
+    #   - D: [radial distance, polar theta, azimuthal phi]
+    # OUTPUT
+    #   - p: translated point [x,y,z] 
     # translate to origin
     ps=[0,0,0]
-    ps[0] = p0[0] - Pr[0]
-    ps[1] = p0[1] - Pr[1]
-    ps[2] = p0[2] - Pr[2]  
+    ps[0] = p0[0] - Rp[0]
+    ps[1] = p0[1] - Rp[1]
+    ps[2] = p0[2] - Rp[2]  
     # get current spherical coords
     r0 = LA.norm(ps) 
     if (r0 < 1e-16):
         theta0 = 0.5*pi
         phi0 = 0 
     else :
-        theta0 = np.arccos(ps[2]/r0)
+        theta0 = np.arccos(ps[2]/r0) #changed sign TIM IOANNIDIS
         phi0 = np.arctan2(ps[1],ps[0]) # atan doesn't work due to signs
     # get translation vector
     p = [0,0,0]
-    p[0] = -D[0]*sin(theta0+D[1])*cos(phi0+D[2]) - p0[0]
-    p[1] = -D[0]*sin(theta0+D[1])*sin(phi0+D[2]) - p0[1]
-    p[2] = -D[0]*cos(theta0+D[1]) - p0[2]
+    p[0] = -D[0]*np.sin(theta0+D[1])*np.cos(phi0+D[2]) - p0[0]
+    p[1] = -D[0]*np.sin(theta0+D[1])*np.sin(phi0+D[2]) - p0[1]
+    p[2] = -D[0]*np.cos(theta0+D[1]) - p0[2]
     return p
     
-def PointRotateSph(Pr,p0,D):    
-    from math import cos, sin, sqrt 
-    # translate to origin
+def PointRotateSph(Rp,p0,D):    
+    #############################################
+    ############# contains rotation #############
+    ########## matrix about x,y,z axes ##########
+    #############################################
+    # INPUT
+    #   - Rp: reference point [x,y,z]
+    #   - p0: point to be rotated [x,y,z]
+    #   - D: [theta-x, theta-y, theta-z]
+    # OUTPUT
+    #   - p: rotated point
+    # translate to origin (reference)
     ps=[0,0,0]
-    ps[0] = p0[0] - Pr[0]
-    ps[1] = p0[1] - Pr[1]
-    ps[2] = p0[2] - Pr[2]  
-    # build 3D rotation matrices around x,y,z axes
+    ps[0] = p0[0] - Rp[0]
+    ps[1] = p0[1] - Rp[1]
+    ps[2] = p0[2] - Rp[2]  
+    # build 3D rotation matrices about x,y,z axes
     Mx=[[1, 0, 0],[0, cos(D[0]), -sin(D[0])],[0, sin(D[0]), cos(D[0])]]
     My=[[cos(D[1]), 0, sin(D[1])],[0, 1, 0],[-sin(D[1]), 0, cos(D[1])]]
     Mz=[[cos(D[2]), -sin(D[2]), 0],[sin(D[2]), cos(D[2]), 0],[0, 0, 1]]
@@ -87,65 +154,152 @@ def PointRotateSph(Pr,p0,D):
     M = np.array(np.mat(Mx)*np.mat(My)*np.mat(Mz))
     p=[0.0, 0.0, 0.0]
     # rotate atom and translate it back from origin
-    p[0] = M[0][0]*ps[0] + M[0][1]*ps[1] + M[0][2]*ps[2] + Pr[0]
-    p[1] = M[1][0]*ps[0] + M[1][1]*ps[1] + M[1][2]*ps[2] + Pr[1]
-    p[2] = M[2][0]*ps[0] + M[2][1]*ps[1] + M[2][2]*ps[2] + Pr[2]
+    p[0] = M[0][0]*ps[0] + M[0][1]*ps[1] + M[0][2]*ps[2] + Rp[0]
+    p[1] = M[1][0]*ps[0] + M[1][1]*ps[1] + M[1][2]*ps[2] + Rp[1]
+    p[2] = M[2][0]*ps[0] + M[2][1]*ps[1] + M[2][2]*ps[2] + Rp[2]
     return p
+    
+def reflect_through_plane(mol,u,Rp):
+    ############################################
+    ##### reflects molecule through plane ######
+    ##### with normal u and a point rp #########
+    ############################################
+    # INPUT
+    #   - mol: molecule to be manipulated
+    #   - u: normal vector to plane
+    #   - rp: reference point on plane
+    # OUTPUT
+    #   - mol: reflected molecule
+    un = LA.norm(u)
+    if (un > 1e-16):
+        u[0] = u[0]/un
+        u[1] = u[1]/un
+        u[2] = u[2]/un
+    for atom in mol.atoms:
+        # Get new point after rotation
+        Rt = ReflectPlane(u,atom.coords(),Rp)
+        atom.set_coords(Rt)
+    return mol
 
-def protate(Mol, Rr, Delta):
-    # rotate/translate around reference point
+def rotate_around_axis(mol,Rp,u,theta):
+    ###############################################
+    ########## rotates molecule about #############
+    ####### arbitrary axis with direction #########
+    ############# u through point rp ##############
+    ################ by angle theta ###############
+    ###############################################
+    # INPUT
+    #   - mol: molecule to be manipulated
+    #   - Rp: reference point [x,y,z]
+    #   - u: direction vector [vx,vy,vz]
+    #   - theta: angle to rotate in degrees
+    # OUTPUT
+    #   - mol: translated molecule
+    un = LA.norm(u)
+    theta = (theta/180.0)*pi
+    if (un > 1e-16):
+        u[0] = u[0]/un
+        u[1] = u[1]/un
+        u[2] = u[2]/un
+    for atom in mol.atoms:
+        # Get new point after rotation
+        Rt = PointRotateAxis(u,Rp,atom.coords(),theta)
+        atom.set_coords(Rt)
+    return mol
+
+def setdistance(mol, Rp, bond):
+    #################################################
+    ########## sets distance of molecule ############
+    ############## from reference point #############
+    #################################################
+    # INPUT
+    #   - mol: molecule to be manipulated
+    #   - Rp: reference point [x,y,z]
+    #   - bond: final bond length between molecule, center of mass
+    # OUTPUT
+    #   - mol: translated molecule
+    # get float bond length
+    bl = float(bond)
+    # get center of mass
+    cm = mol.centermass()
+    # get unit vector through line r = r0 + t*u
+    u = [a-b for a,b in zip(cm,Rp)]
+    t = bl/LA.norm(u) # get t as t=bl/norm(r1-r0)
+    # get shift for centermass
+    dxyz = [0,0,0]
+    dxyz[0] = Rp[0]+t*u[0]-cm[0]
+    dxyz[1] = Rp[1]+t*u[1]-cm[1]
+    dxyz[2] = Rp[2]+t*u[2]-cm[2]
+    for atom in mol.atoms:
+        # Translate atoms
+        atom.translate(dxyz)
+    return mol
+
+def protate(mol, Rr, D):
+    ##############################################
+    ######## translates/rotates molecule #########
+    ########### about reference point ############
+    ##############################################
+    # INPUT
+    #   - mol: molecule to be manipulated
+    #   - Rr: reference point [x,y,z]
+    #   - D: [radial distance, polar theta, azimuthal phi]
+    # OUTPUT
+    #   - mol: translated molecule
+    # rotate/translate about reference point
     # convert to rad
-    Delta[0] = float(Delta[0])
-    Delta[1] = (float(Delta[1])/180)*pi
-    Delta[2] = (float(Delta[2])/180)*pi
-    # rotate/translate around reference point
-    Mol = translate_around_Rp(Mol,Rr,Delta)
-    return Mol
+    D[0] = float(D[0])
+    D[1] = (float(D[1])/180.0)*pi
+    D[2] = (float(D[2])/180.0)*pi
+    # rotate/translate about reference point
+    # get center of mass
+    pmc = mol.centermass()
+    # get translation vector that corresponds to new coords
+    Rt = PointTranslateSph(Rr,pmc,D)
+    # translate molecule
+    mol.translate(Rt)
+    return mol
 
-def cmrotate(Mol, Delta):
-    # rotate around center of mass    
+def cmrotate(mol, D):
+    ########################################
+    ########## rotates molecule ############
+    ######## about center of mass ##########
+    ########################################
+    # INPUT
+    #   - mol: molecule to be manipulated
+    #   - D: [theta-x, theta-y, theta-z]
+    # OUTPUT
+    #   - mol: translated molecule
     # convert to rad
-    Delta[0] = (float(Delta[0])/180)*pi
-    Delta[1] = (float(Delta[1])/180)*pi
-    Delta[2] = (float(Delta[2])/180)*pi
-    Mol = rotate_around_cm(Mol,Delta)
-    return Mol
-
-if __name__ == "__main__":
-    if len(sys.argv) < 5 :
-        print '\n Usage for translate/rotate around RP: python rotate.py input.xyz <Reference point> <Dr> <Dtheta> <Dphi> '
-        print 'Example : python rotate.py input.xyz 0.0 0.0 0.0 0.5 30.0 60.0 \n'
-        print 'OR\n'
-        print '\n Usage for rotation around CM: python rotate.py input.xyz <Dthetax> <Dthetay> <Dthetaz>'
-        print 'Example : python rotate.py input.xyz 20.0 30.0 40.0\n'
-        sys.exit()
-    filename = sys.argv[1]   
-    # initialize mol
-    mol = []
-    with open(filename) as f:
-        data = f.readlines()
-    f.closed
-    h = filename.split('.xyz')
-    output=h[0]+'_rotated.xyz'
-    f = open(output,'w')    
-    f.write(str(len(data)-2)+'\n\n')   
-    for idx,line in enumerate(data):
-        newline = " ".join(line.split())
-        fin = newline.split(' ')
-        if idx > 1 :
-           # reference point
-           R = [float(fin[1]),float(fin[2]),float(fin[3])]        
-           mol.append([fin[0],R[0],R[1],R[2]])
-    if len(sys.argv)==8:
-        Rr=[float(sys.argv[2]), float(sys.argv[3]), float(sys.argv[4])]
-        D=[float(sys.argv[5]), float(sys.argv[6]), float(sys.argv[7])]
-        Mol = protate(mol, Rr, D)    
-    elif len(sys.argv)==5:
-        D=[float(sys.argv[8]), float(sys.argv[9]), float(sys.argv[10])]
-        Mol = cmrotate(mol, D)    
-    else:
-        print 'Wrong number of input arguments. Exiting..'
-        sys.exit()
-    for atom in Mol:
-        f.write(atom[0] + '\t' + str(atom[1]) + '\t'+ str(atom[2]) + '\t'+str(atom[3])+'\t' + '\n')  
-    f.closed    
+    D[0] = (float(D[0])/180.0)*pi
+    D[1] = (float(D[1])/180.0)*pi
+    D[2] = (float(D[2])/180.0)*pi
+    # perform rotation
+    pmc = mol.centermass()
+    for atom in mol.atoms:
+        # Get new point after rotation
+        Rt = PointRotateSph(pmc,atom.coords(),D)
+        atom.set_coords(Rt)
+    return mol
+    
+def pmrotate(mol, Rp, D):
+    ########################################
+    ########## rotates molecule ############
+    ######## about reference point #########
+    ########################################
+    # INPUT
+    #   - mol: molecule to be manipulated
+    #   - Rp: reference point [x,y,z]
+    #   - D: [theta-x, theta-y, theta-z]
+    # OUTPUT
+    #   - mol: translated molecule
+    # convert to rad
+    D[0] = (float(D[0])/180.0)*pi
+    D[1] = (float(D[1])/180.0)*pi
+    D[2] = (float(D[2])/180.0)*pi
+    # perform rotation
+    for atom in mol.atoms:
+        # Get new point after rotation
+        Rt = PointRotateSph(Rp,atom.coords(),D)
+        atom.set_coords(Rt)
+    return mol   

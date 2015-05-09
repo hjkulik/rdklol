@@ -44,12 +44,19 @@ class mol3D:
         self.natoms += 1
         self.mass += atom.mass 
         self.size = self.molsize()
+    def deleteatom(self,atomIdx):
+        self.mass -= self.GetAtom(atomIdx).mass
+        self.natoms -= 1
+        for i in range(atomIdx,self.natoms):
+            self.atoms[i] = self.atoms[i+1]
     def translate(self,dxyz):
         # translates molecules by dx,dy,dz
         for atom in self.atoms:
             atom.translate(dxyz)
     def GetAtom(self,idx):
         return self.atoms[idx]
+    def GetAtoms(self):
+        return self.atoms
     def centermass(self):
         # calculates center of mass of molecule
         # initialize center of mass and mol mass
@@ -74,6 +81,12 @@ class mol3D:
         cm1 = mol.centermass()
         pmc = distance(cm0,cm1)
         return pmc
+    def alignmol(self,mol,atom1,atom2):
+        ''' aligns molecule 2(mol) based on atoms 1 and 2 '''
+        # get vector of distance between atoms 1,2
+        dv = atom2.distancev(atom1)
+        # align molecule
+        self.translate(dv)
     def molsize(self):
         # calculates maximum distance between center of mass and atoms
         maxd = 0
@@ -88,16 +101,17 @@ class mol3D:
         for atom in mol.atoms:
             cmol.addatom(atom)
         return cmol
-    def overlapcheck(self,mol):
+    def overlapcheck(self,mol,silence):
         # checks for overlap with another molecule
         overlap = False
         for atom1 in mol.atoms:
             for atom0 in self.atoms:
                 if (distance(atom1.coords(),atom0.coords()) < atom1.rad + atom0.rad):
                     overlap = True
-                    print "#############################################################"
-                    print "!!!Molecules might be overlapping. Increase distance!!!"
-                    print "#############################################################"
+                    if not (silence):
+                        print "#############################################################"
+                        print "!!!Molecules might be overlapping. Increase distance!!!"
+                        print "#############################################################"
                     break
         return overlap
     def writexyz(self,filename):
