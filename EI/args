@@ -1,17 +1,22 @@
-# Example input file
-# specify input data
--c 	ferrocene # core
--a	perchlorate # anion
--suff	t0  # suffix for runs folder
--lig	acetonitrile 2# ligand and times appearing in the molecule
--na 	1 # number of configurations
--mind	-3  # minimum difference in distance between anion core (mindist=size1+size2+mind)
--maxd   10 # minimum difference in distance between anion core (maxdist=size1+size2+maxd)
-# specify job parameters
--m	ub3lyp # method
--dispersion yes # method
--b	lacvps_ecp # basis
--sp	2	# spin state
--ch	0	# charge 
--q	gpus # queue
--g	1 # gpus
+############################
+######## SIMPLIFY ##########
+############################
+#### Example input file ####
+-c 	iron 	# core
+#-a	nitrate 	# anion
+#-suff	test  		# suffix for runs folder
+#-rgen	50 		# random generation, overwrites lig and ligocc
+-lig	benzene ammonia x # ligand appearing in the molecule
+-ligocc	6 4 1	# occurence of each ligand defined in lig in the molecule (default 1)
+-na 	1 		# number of configurations
+-mind	0  		# minimum difference in distance between anion core (mindist=size_core+mind)
+-maxd   2 		# maximum difference in distance between anion core (maxdist=size_core+maxd)
+#### specify job parameters ####
+-rdir	Calctest	# relative directory for running jobs
+-m	ub3lyp 		# method
+-dispersion yes 	# method
+-b	lacvps_ecp 	# basis
+-sp	2		# spin state
+-ch	0		# charge 
+-q	gpus 		# queue
+-g	1 		# gpus

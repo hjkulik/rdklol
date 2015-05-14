@@ -114,6 +114,22 @@ class mol3D:
                         print "#############################################################"
                     break
         return overlap
+    def mindist(self,mol):
+        # checks for overlap with another molecule
+        mind = 1000
+        for atom1 in mol.atoms:
+            for atom0 in self.atoms:
+                if (distance(atom1.coords(),atom0.coords()) < mind):
+                    mind = distance(atom1.coords(),atom0.coords())
+        return mind
+    def maxdist(self,mol):
+        # checks for overlap with another molecule
+        maxd = 0
+        for atom1 in mol.atoms:
+            for atom0 in self.atoms:
+                if (distance(atom1.coords(),atom0.coords()) > maxd):
+                    maxd = distance(atom1.coords(),atom0.coords())
+        return maxd
     def writexyz(self,filename):
         ''' writes xyz file for self molecule'''
         ss = '' # initialize returning string

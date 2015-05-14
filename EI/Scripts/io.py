@@ -26,13 +26,13 @@ def parseinput(args):
             l = line.split('#')[0] # remove comments
             l = filter(None,re.split(' |,|\t',l))
             if (l[0]=='-c'):
-                args.core = l[1]
+                args.core = l[1].lower()
             if (l[0]=='-a'):
-                args.anion = l[1]
+                args.anion = l[1].lower()
             if (l[0]=='-na'):
                 args.anionsnum = l[1]
             if (l[0]=='-m'):
-                args.method = l[1]
+                args.method = l[1].lower()
             if (l[0]=='-b'):
                 args.basis = l[1]
             if (l[0]=='-sp'):
@@ -40,7 +40,7 @@ def parseinput(args):
             if (l[0]=='-ch'):
                 args.charge = l[1]
             if (l[0]=='-q'):
-                args.queue = l[1]
+                args.queue = l[1].lower()
             if (l[0]=='-g'):
                 args.gpus = l[1]
             if (l[0]=='-maxd'):
@@ -48,7 +48,7 @@ def parseinput(args):
             if (l[0]=='-mind'):
                 args.mind = l[1]
             if (l[0]=='-lig'):
-                args.lig = l[1:]
+                args.lig = [ll.lower() for ll in l[1:]]
             if (l[0]=='-ligocc'):
                 args.ligocc = l[1:]
             if (l[0]=='-rgen'):
@@ -56,7 +56,7 @@ def parseinput(args):
             if (l[0]=='-suff'):
                 args.suff = l[1].strip('\n')
             if (l[0]=='-dispersion'):
-                args.dispersion = l[1].strip('\n')
+                args.dispersion = l[1].strip('\n').lower()
             if (l[0]=='-rdir'):
                 args.rundir = l[1].strip('\n')
                 if (args.rundir[-1]=='/'):
@@ -105,7 +105,7 @@ def readdict(fname):
     for line in lines:
         key = filter(None,line.split(':')[0])
         val = filter(None,line.split(':')[1])
-        d[key] = filter(None,val.split(','))
+        d[key] = filter(None,re.split(',| ',val))
     return d 
     
 def getligs(installdir):
@@ -166,7 +166,7 @@ def core_load(installdir,userinput,mcores):
         # load core mol file (without hydrogens)
         core=Chem.MolFromMolFile(installdir+'Cores/'+mcores[userinput][0],removeHs=False)
         core.cg=mcores[userinput][1]
-        core.cat = [int(l) for l in filter(None,mcores[userinput][2].split(None))]
+        core.cat = [int(l) for l in filter(None,mcores[userinput][2:])]
     return core
     
 def lig_load(installdir,userinput,licores):
@@ -180,7 +180,7 @@ def lig_load(installdir,userinput,licores):
     else:
         # load lig mol file (with hydrogens)
         lig=Chem.MolFromMolFile(installdir+'Ligands/'+licores[userinput][0],removeHs=False)
-        lig.atID=licores[userinput][1]
+        lig.cat = [int(l) for l in licores[userinput][1:]]
     return lig
 
 def anion_load(installdir,userinput,ancores):

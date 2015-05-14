@@ -14,11 +14,17 @@ Created on 12/20/14
 
 from Scripts.rungen import *
 from Scripts.io import *
+from Classes.globalvars import *
+from Classes.mol3D import mol3D
+from Classes.atom3D import atom3D
 import argparse
+from math import sqrt
+from math import floor
 import sys
 import os
 import random
 import shutil
+
 
 ############ GLOBALS DEFINITION ############
 installdir="/home/timis/rdklol/EI/" # Installation directory
@@ -47,25 +53,8 @@ if __name__ == "__main__":
     if not os.path.isdir(rundir):
         os.mkdir(rundir)
     ################### START MAIN ####################    
-    if (args.rgen):        
-        ligs = readdict(installdir+'/Ligands/ligands.dict') # get ligands
-        # unique single ligands
-        lnums = random.sample(range(0, len(ligs)), min([len(ligs),int(args.rgen[0])]))
-        for k in range(0,len(lnums)):
-            args.lig = []
-            args.ligocc = []
-            args.lig.append(ligs.keys()[lnums[k]])
-            rungen(installdir,rundir,args)
-        dnum = int(args.rgen[0]) - len(ligs)
-        if (dnum>0):
-            lnums0 = random.sample(range(0, len(ligs)), dnum)
-            lnums1 = random.sample(range(0, len(ligs)), dnum)
-            for k in range(0,dnum):
-                args.lig = []
-                args.ligocc = []
-                args.lig.append(ligs.keys()[lnums0[k]])
-                args.lig.append(ligs.keys()[lnums1[k]])
-                rungen(installdir,rundir,args) # run structure generation
+    if (args.rgen):
+        randomgen(installdir,rundir,args)
     else:
         rungen(installdir,rundir,args) # run structure generation
     ss = "***********************************************************"

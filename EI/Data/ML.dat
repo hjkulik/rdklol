@@ -1,3 +1,5 @@
 # Default data for bond lengths (in A) between metal and ligand for 6 5 4 3 2 coordination
-Fe	N	2.2	2.2	2.2	2.2	2.2	2.2
-Fe	C	2.3	2.3	2.3	2.3	2.3	2.3
+Fe	N1	2.2	2.2	2.2	2.2	2.2	2.2
+Fe	N2	2.23	2.2	2.2	2.2	2.2	2.2
+Fe	N3	1.9	2.2	2.2	2.2	2.2	2.2
+Fe	C1	2.3	2.3	2.3	2.3	2.3	2.3

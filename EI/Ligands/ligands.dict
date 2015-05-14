@@ -2,6 +2,7 @@ acetonitrile:acetonitrile.mol,1
 amine:amine.mol,0
 ammonia:ammonia.mol,0
 benzene:benzene.mol,4
+bipy:bipy.mol,0 1
 carbonyl:carbonyl.mol,0
 cyanide:cyanide.mol,0
 ethyl:ethyl.mol,1
@@ -10,5 +11,7 @@ methyl:methyl.mol,0
 nitro:nitro.mol,1
 PPh3:PPh3.mol,2
 pyridine:pyridine.mol,3
+terpy:terpy.mol,0 1 2
 thiocyanate:thiocyanate.mol,1
 water:water.mol,0
+x:x.mol,0
