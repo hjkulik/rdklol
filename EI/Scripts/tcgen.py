@@ -90,7 +90,7 @@ def job_check(userinput,fdir):
        exit()
     return jobname,jobtrunc,jobfile
 
-def tcgen(args,strfiles,lig):
+def tcgen(args,strfiles,lig,charge):
     jobdirs = []
     # Initialize the jobparams dictionary with mandatory/useful keywords.
     jobparams={'run': 'minimize',
@@ -109,7 +109,7 @@ def tcgen(args,strfiles,lig):
            'gpus': '1',
             }
     if (args.dispersion):
-	jobparams['dispersion']=args.dispersion
+        jobparams['dispersion']=args.dispersion
     # Overwrite plus add any new dictionary keys from commandline input.       
     # Check to make sure that $TeraChem is loaded/initialized:
     ld_extra,tc_exe,modname=tc_check(args.terachem)   
@@ -143,6 +143,8 @@ def tcgen(args,strfiles,lig):
        jobparams['spinmult']=args.spin
     if args.charge:
        jobparams['charge']=args.charge
+    else:
+       jobparams['charge']=charge
     # Check for existence of basis and sanitize name
     if args.basis:
        ecp=False # Flag not currently used, for deciding gpus_ecp code or not later. Can always specify with 'extra' command

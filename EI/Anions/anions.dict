@@ -1,8 +1,9 @@
 dihydrogenphosphite:dihydrogenphosphite.mol
-perchlorate:perchlorate.mol
+perchlorate:perchlorate.xyz
 oxalate:oxalate.mol
 bisulfate:bisulfate.mol
 bicarbonate:bicarbonate.mol
 nitrate:nitrate.mol
+oxygen:oxygen.mol
 dihydrogenphosphate:dihydrogenphosphate.mol
 bisulfite:bisulfite.mol

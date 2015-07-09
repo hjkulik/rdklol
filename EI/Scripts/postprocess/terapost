@@ -1,0 +1,218 @@
+#!/usr/bin/env python
+'''
+Created on Nov 4, 2014
+
+@author: tim
+
+# Written by Tim Ioannidis Mar 12 2015 for HJK Group
+# Dpt of Chemical Engineering, MIT
+'''
+
+import subprocess
+import re
+import sys
+import os
+import time
+import shutil
+import smtplib
+from math import sqrt
+
+
+
+##########################################################
+########## This script post-processes the  ###############
+#######  results from terachem calculations  #############
+##########################################################
+
+# global dictionary of metals with atomic numbers
+metals = {'Sc':21,'Ti':22,'V':23,'Cr':24,'Mn':25,'Fe':26,'Co':27,'Ni':28,'Cu':29,
+          'Y':39,'Zr':40,'Nb':41,'Mo':42,'Tc':43,'Ru':44,'Rh':45,'Pd':46,'Pt':78,'Au':79,'In':49}
+
+# atoms dictionary contains atomic mass, atomic number, covalent radius
+amass = {'H':(1.0079,1,0.37),'XH':(1.0079,1,0.37),'C':(12.0107,6,0.77),'XC':(12.0107,6,0.77),'N':(14.0067,7,0.75),'XN':(14.0067,7,0.75),'O':(15.9994,8,0.73),'XO':(15.9994,8,0.73),'F':(18.9984,9,0.71),
+        'P':(30.9738,15,1.06),'S':(32.065,16,1.02),'Cl':(35.453,17,0.99),'Ti':(47.867,22,1.36),'Cr':(51.9961,24,1.27),
+        'Mn':(54.938,25,1.39),'Fe':(55.84526,26,1.25),'XFe':(55.84526,26,1.25),'Ni':(58.4934,28,1.21),'Co':(58.9332,27,1.26),
+        'Cu':(63.546,29,1.38),'Zn':(65.39,30,1.31),'Br':(79.904,35,1.14)}
+
+def distance(R1,R2):
+    dx = R1[0] - R2[0] 
+    dy = R1[1] - R2[1] 
+    dz = R1[2] - R2[2] 
+    d = sqrt(dx**2+dy**2+dz**2)
+    return d
+
+def centermass(mol):
+    cm = [0.0,0.0,0.0]
+    mass = 0.0
+    for atom in mol:
+        mass += amass[atom[0]][0]
+        cm[0] += amass[atom[0]][0]*atom[1]
+        cm[1] += amass[atom[0]][0]*atom[2]
+        cm[2] += amass[atom[0]][0]*atom[3]
+    cm[0] /= mass
+    cm[1] /= mass
+    cm[2] /= mass
+    return cm
+
+def calcdist(xyzf,Nmol):    
+    #load file and convert to molecule
+    f = open(xyzf,'r')
+    t=f.read()
+    t = t.splitlines()
+    mol0 = []
+    mol1 = []
+    NoAtoms = int(t[0])
+    for i,line in enumerate(t[2:]):
+        l = line.split(None)
+        if (i<int(Nmol)):
+            mol0.append([l[0],float(l[1]),float(l[2]),float(l[3])])
+        else:
+            mol1.append([l[0],float(l[1]),float(l[2]),float(l[3])])
+    cm0 = centermass(mol0)
+    cm1 = centermass(mol1)
+    d=distance(cm0,cm1)
+    return d
+
+def getNat(xyzf):
+    #load file and convert to molecule
+    f = open(xyzf,'r')
+    t=f.read()
+    t = t.splitlines()
+    for i,line in enumerate(t[2:]):
+        l = line.split(None)
+        if l[0] in metals.keys():
+            break
+    return str(i)
+    
+
+
+def mybash(cmd):
+    p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    stdout = []
+    while True:
+        line = p.stdout.readline()
+        stdout.append(line)        
+        if line == '' and p.poll() != None:
+            break
+    return ''.join(stdout)
+
+def find_between(s, first, last ):
+    # returns string between first and last substrings
+    s=s.split(first)
+    s=s[1].split(last)
+    return s[0]
+
+
+def terachem(folder,t,prefix,Nat):
+    print "\n##################### Getting your results ######################\n\n"
+    # get results files
+    resfiles=mybash("find "+folder+" -name '*.out' ")
+    resfiles=filter(None,re.split('\n',resfiles))
+    header="Date: " +  t+ "\nHi Tim, here are the current results for runs in folder '"+folder+"'\n"
+    header += "\nFolder    Compound    Method  %HF  Restricted   Optim  Converged  NoSteps   Spin   S^2   Charge    Energy(au)   Distance(A)    Time(s)\n"
+    header += "---------------------------------------------------------------------------------------------------------------------------------------\n"
+    # loop over folders
+    resf = []
+    text = [] 
+    for numi,resf in enumerate(resfiles):
+        resd = resf.rsplit('/',1)[0]
+        resfold = resd.rsplit('/',1)[-1]
+        print 'Processing ',resf
+        nboan = False
+        with open(resf) as f:
+            s = f.read()
+            f.close()
+        # split output into terachem and nbo parts
+        stera = s # get tera output
+        ''' Parse terachem output '''
+        ss = stera.splitlines()
+        # get simulation parameters
+        comp = [line for line in ss if 'XYZ coordinates' in line][0].rsplit(None,1)[-1]
+        comp = comp.split('.xyz')[0] # compound name
+        spin = [line for line in ss if 'Spin multiplicity:' in line][0].rsplit(None,1)[-1] # spin mult
+        ssq = filter(None,[line for line in ss if 'SPIN S-SQUARED' in line])# SPIN S-SQUARED
+        if (len(ssq)>0):
+            ssqs=filter(None,ssq[-1].split(')'))
+            ssq = ssqs[-1].split(None)[-1]
+        else:
+            ssq = 'NA'
+        tcharge = [line for line in ss if 'Total charge:' in line]
+        if len(tcharge)>0:
+            tcharge=tcharge[0].rsplit(None,1)[-1] # total charge
+        else:
+            tcharge = 'ERROR'
+        UR = [line for line in ss if 'Wavefunction:' in line][0].rsplit(None,1)[-1][0] # U/R (Un)restricted
+        smethod = [line for line in ss if 'Method:' in line][0].split(None) # functional
+        method = smethod[1]
+        if (smethod[-2]=='dispersion'):
+            method += '-D'
+        hfx = [line for line in ss if 'Hartree-Fock exact exchange:' in line]
+        if len(hfx) > 0:
+            hfx = hfx[0].rsplit(None,1)[-1] # HFX
+        else:
+            hfx = '0.0'
+        optim = [line for line in ss if 'RUNNING GEOMETRY' in line] # optimization?
+        optim = 'Y' if len(optim)>0 else 'N'
+        # get results
+        en = [line for line in ss if 'FINAL ENERGY:' in line] # energy
+        en = en[-1].rsplit(None,2)[-2] if len(en)>0 else 'NaN'        
+        conv = 'NA'
+        if (optim=='Y'):
+            conv = [line for line in ss if 'Converged!' in line]
+            conv = 'Y' if len(conv)>0 else 'N'
+            if conv=='Y':
+                lnosteps = [line for line in ss if 'Number of steps' in line][-1]
+                nosteps = filter(None,lnosteps.split(None))[-1]
+            else:
+                nosteps = 'NA'
+        else:
+            conv ='NA'
+            nosteps = 'NA'
+        timet = [line for line in ss if 'Total processing time:' in line]
+        if (len(timet) > 0 ):
+            time = timet[0].rsplit(None,2)[-2]
+        else:
+            time = 'NOT DONE'
+        # construct string record of results
+        tt = resfold.ljust(12)+comp.ljust(12)+method.ljust(7)+("{:3.0f}".format(100*float(hfx))+'%').ljust(10)+UR.ljust(10)+optim.ljust(8)+conv.ljust(9)+nosteps.ljust(10)+spin.ljust(5)+ssq.ljust(9)
+        #Natom = Nat if Nat > 0 else getNat(resd+'/'+comp+'.xyz')
+        Natom = -1
+        if (int(Natom)>0):
+            d = calcdist(resd+'/'+comp+'.xyz',Natom)
+            tt += tcharge.ljust(6)+"{:10.6f}".format(float(en)).ljust(13)+"{:10.5}".format(d).ljust(16)+time+'\n'
+        else:
+            tt += tcharge.ljust(6)+"{:10.6f}".format(float(en)).ljust(18)+'     NA         '+time+'\n'
+        text.append(tt)
+    # sort alphabetically and print
+    text=sorted(text)
+    f=open(prefix+'results.txt','w')
+    f.write(header+''.join(text)) 
+    if (Nat > 0 ):
+        print "\nYou might want to update xyz files by running <update_guess> if you performed optimizations.Just saying.."
+    print "\n\n##################### Your results are ready ######################\n"
+
+
+if __name__ == '__main__':
+    args = sys.argv[1:]
+    t=time.strftime('%c')
+    prefix = ''
+    Nat = 0 
+    if len(args)==0:
+        print "\nUsage: terapost <root folder> <results-prefix> <-dist> <NoAtoms>\n"
+        folder=raw_input("\nPlease enter jobs root folder: ")
+    elif len(args)==1:
+	folder = args[0]
+    elif len(args)==2:
+        folder = args[0]
+        prefix = args[1]+'-'
+    elif len(args)==3:
+        folder = args[0]
+        Nat = int(args[args.index('-dist')+1])
+    elif len(args)==4:
+        folder = args[0]
+        prefix = args[1]+'-'
+        Nat = int(args[args.index('-dist')+1])
+    if not os.path.isdir(folder):
+        print "Directory " + folder +" does not exist. Exiting.."
+    else:
+        terachem(folder,t,prefix,Nat)

@@ -16,6 +16,53 @@ from Classes.atom3D import atom3D
 ################### atoms in 3D space ####################
 ##########################################################
 
+def distance(R1,R2):
+    dx = R1[0] - R2[0] 
+    dy = R1[1] - R2[1] 
+    dz = R1[2] - R2[2] 
+    d = sqrt(dx**2+dy**2+dz**2)
+    return d
+
+def kabsch(mol0,mol1):
+    ###################################################
+    ######### aligns mol0 with respect to mol1 ########
+    ########### to minimize the RMSD value ############
+    ########### using the Kabsch algorithm ############
+    ## http://en.wikipedia.org/wiki/Kabsch_algorithm ##
+    ###################################################
+    # INPUT
+    #   - mol0: molecule to be aligned
+    #   - mol1: reference molecule
+    # OUTPUT
+    #   - mol0: aligned molecule
+    # get coordinates and matrices P,Q
+    P, Q = [],[]
+    for atom0,atom1 in zip(mol0.GetAtoms(),mol1.GetAtoms()):
+        P.append(atom0.coords())
+        Q.append(atom1,coords())
+    # Computation of the covariance matrix
+    C = np.dot(np.transpose(P), Q)
+    # Computation of the optimal rotation matrix
+    # This can be done using singular value decomposition (SVD)
+    # Getting the sign of the det(V)*(W) to decide
+    # whether we need to correct our rotation matrix to ensure a
+    # right-handed coordinate system.
+    # And finally calculating the optimal rotation matrix U
+    # see http://en.wikipedia.org/wiki/Kabsch_algorithm
+    V, S, W = np.linalg.svd(C)
+    d = (np.linalg.det(V) * np.linalg.det(W)) < 0.0
+    if d:
+        S[-1] = -S[-1]
+        V[:,-1] = -V[:,-1]
+    # Create Rotation matrix U
+    U = np.dot(V, W)
+    # Rotate P
+    P = np.dot(P, U)
+    # write back coordinates
+    for i,atom in enumerate(mol0.GetAtoms()):
+        atom.setcoords(P[i])
+    return mol0
+
 def ReflectPlane(u,r,Rp):
     #################################################
     ####### contains roto-translation matrix ########
@@ -57,46 +104,6 @@ def ReflectPlane(u,r,Rp):
     rn[2] = R[2][0]*r[0]+R[2][1]*r[1]+R[2][2]*r[2] + R[2][3] 
     return rn
     
-def PointAlignAxis(r,u1):
-    ############################################
-    ############ contains rotation #############
-    ######### matrix for aligning pont #########
-    ############ to specified axis #############
-    ############################################
-    # INPUT
-    #   - u0: current vector
-    #   - u1: target vector
-    #   - r: point to be aligned
-    # OUTPUT
-    #   - rn: rotated point
-    R=[[1,0,0],[0,1,0],[0,0,1]]
-    nr = LA.norm(r)
-    r[0] = r[0]/nr
-    r[1] = r[1]/nr
-    r[2] = r[2]/nr
-    nu1 = LA.norm(u1)
-    u1[0] = u1[0]/nu1
-    u1[1] = u1[1]/nu1
-    u1[2] = u1[2]/nu1
-    v = np.cross(r,u1)
-    sinth = LA.norm(v)
-    costh = np.dot(r,u1)
-    vm =[[0,-v[2],v[1]],[v[2],0,-v[0]],[-v[1],v[0],0]]
-    vsq = [[-v[2]**2-v[1]**2,v[0]*v[1],v[0]*v[2]],[v[0]*v[1],-v[0]**2-v[2]**2,v[1]*v[2]],
-            [v[0]*v[2],v[1]*v[2],-v[1]**2-v[0]**2]]
-    for i in range(0,3):
-        for j in range(0,3):
-            R[i][j] = R[i][j] + vm[i][j]+vsq[i][j]*(1-costh)/(sinth**2)
-    rn = [0,0,0]
-    rn[0] = R[0][0]*r[0]+R[0][1]*r[0]+R[0][2]*r[2]
-    rn[1] = R[1][0]*r[0]+R[1][1]*r[0]+R[1][2]*r[2]
-    rn[2] = R[2][0]*r[0]+R[2][1]*r[0]+R[2][2]*r[2]
-    nrn = LA.norm(rn)
-    rn[0] = rn[0]*nr/nrn
-    rn[1] = rn[1]*nr/nrn
-    rn[2] = rn[2]*nr/nrn
-    return rn
-            
 
 def PointRotateAxis(u,rp,r,theta):
     #################################################
@@ -219,7 +226,7 @@ def reflect_through_plane(mol,u,Rp):
     for atom in mol.atoms:
         # Get new point after rotation
         Rt = ReflectPlane(u,atom.coords(),Rp)
-        atom.set_coords(Rt)
+        atom.setcoords(Rt)
     return mol
 
 def rotate_around_axis(mol,Rp,u,theta):
@@ -245,10 +252,37 @@ def rotate_around_axis(mol,Rp,u,theta):
     for atom in mol.atoms:
         # Get new point after rotation
         Rt = PointRotateAxis(u,Rp,atom.coords(),theta)
-        atom.set_coords(Rt)
+        atom.setcoords(Rt)
     return mol
 
-def setdistance(mol, Rp, bond):
+def setPdistance(mol, Rr, Rp, bond):
+    #########################################################
+    ########## sets distance of atom in molecule ############
+    ############## from reference point #####################
+    #########################################################
+    # INPUT
+    #   - mol: molecule to be manipulated
+    #   - Rr: coordinates of atom 
+    #   - Rp: reference point [x,y,z]
+    #   - bond: final bond length between Rr, Rp
+    # OUTPUT
+    #   - mol: translated molecule
+    # get float bond length
+    bl = float(bond)
+    # get center of mass
+    # get unit vector through line r = r0 + t*u
+    u = [a-b for a,b in zip(Rr,Rp)]
+    t = bl/LA.norm(u) # get t as t=bl/norm(r1-r0)
+    # get shift for centermass
+    dxyz = [0,0,0]
+    dxyz[0] = Rp[0]+t*u[0]-Rr[0]
+    dxyz[1] = Rp[1]+t*u[1]-Rr[1]
+    dxyz[2] = Rp[2]+t*u[2]-Rr[2]
+    # translate molecule
+    mol.translate(dxyz)
+    return mol
+    
+def setcmdistance(mol, Rp, bond):
     #################################################
     ########## sets distance of molecule ############
     ############## from reference point #############
@@ -319,24 +353,56 @@ def cmrotate(mol, D):
     for atom in mol.atoms:
         # Get new point after rotation
         Rt = PointRotateSph(pmc,atom.coords(),D)
-        atom.set_coords(Rt)
+        atom.setcoords(Rt)
     return mol
     
-def align_to_axis(mol,u1):
+def aligntoaxis(mol,Rr,Rp,u):
     ########################################
     ########## rotates molecule ############
     ########## and aligns to axis ##########
     ########################################
     # INPUT
+    #   - Rr: point to be aligned
     #   - mol: molecule to be manipulated
-    #   - u1: target axis for alignment
+    #   - Rp: reference point through axis
+    #   - u: target axis for alignment
     # OUTPUT
     #   - mol: aligned molecule
-    u0 = mol.centermass()
-    # convert to rad
-    for atom in mol.GetAtoms():
-        Rt = PointAlignAxis(atom.coords(),u1)
-        atom.set_coords(Rt)
+    # get current distance
+    d0 = distance(Rp,Rr)
+    # normalize u
+    t =d0/LA.norm(u) # get t as t=bl/norm(r1-r0)
+    # get shift for point
+    dxyz = [0,0,0]
+    dxyz[0] = Rp[0]+t*u[0]-Rr[0]
+    dxyz[1] = Rp[1]+t*u[1]-Rr[1]
+    dxyz[2] = Rp[2]+t*u[2]-Rr[2]
+    # translate molecule
+    mol.translate(dxyz)
+    return mol
+
+def aligntoaxis(mol,Rr,Rp,u,d):
+    ########################################
+    ########## rotates molecule ############
+    ########## and aligns to axis ##########
+    ########################################
+    # INPUT
+    #   - Rr: point to be aligned
+    #   - mol: molecule to be manipulated
+    #   - Rp: reference point through axis
+    #   - u: target axis for alignment
+    #   - d: final distance
+    # OUTPUT
+    #   - mol: aligned molecule
+    # normalize u
+    t =d/LA.norm(u) # get t as t=bl/norm(r1-r0)
+    # get shift for point
+    dxyz = [0,0,0]
+    dxyz[0] = Rp[0]+t*u[0]-Rr[0]
+    dxyz[1] = Rp[1]+t*u[1]-Rr[1]
+    dxyz[2] = Rp[2]+t*u[2]-Rr[2]
+    # translate molecule
+    mol.translate(dxyz)
     return mol
         
     
@@ -359,5 +425,5 @@ def pmrotate(mol, Rp, D):
     for atom in mol.atoms:
         # Get new point after rotation
         Rt = PointRotateSph(Rp,atom.coords(),D)
-        atom.set_coords(Rt)
+        atom.setcoords(Rt)
     return mol   

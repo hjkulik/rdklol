@@ -1,0 +1,231 @@
+#!/usr/bin/env python
+'''
+Created on Nov 4, 2014
+
+@author: tim
+
+# Written by Tim Ioannidis Mar 12 2015 for HJK Group
+# Dpt of Chemical Engineering, MIT
+'''
+
+import subprocess
+import re
+import sys
+import os
+import time
+import shutil
+from math import sqrt
+from math import pow
+import glob
+
+
+##########################################################
+########## This script post-processes the  ###############
+#######  results from terachem calculations  #############
+##########################################################
+# atoms corresponding if ECP used
+atoms = {'Sc':'Na','Ti':'Mg','V':'Al','Cr':'Si','Mn':'P','Fe':'S','Co':'Cl','Ni':'Ar','Cu':'K','Zn':'Mg'}
+
+def distance(R1,R2):
+    d = 0.0
+    d += pow(R1[0]-R2[0],2)
+    d += pow(R1[1]-R2[1],2)
+    d += pow(R1[2]-R2[2],2)
+    return sqrt(d)
+    
+
+def mybash(cmd):
+    p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    stdout = []
+    while True:
+        line = p.stdout.readline()
+        stdout.append(line)        
+        if line == '' and p.poll() != None:
+            break
+    return ''.join(stdout)
+
+def find_between(s, first, last ):
+    # returns string between first and last substrings
+    s=s.split(first)
+    if len(s) > 1:
+        s=s[1].split(last)
+        return s[0]
+    else:
+        return ""
+
+def getcharge(folder):
+    # get results files
+    resfiles=mybash("find "+folder+" -name '*.molden' ")
+    resfiles=filter(None,re.split('\n',resfiles))
+    header = "\nFolder        Hirshfeld     VDD    Mulliken\n"
+    header += "----------------------------------------------\n"
+    # loop over folders
+    resf = []
+    txt=''
+    for numi,resf in enumerate(resfiles):
+        resd = resf.rsplit('/',2)[0]
+        resd = resd.split('/',1)[-1]
+        outfile = resd+'.txt'
+        print 'Processing ',resd
+        # Run multiwfn 
+        inputtxt = '7\n1\n1\n' # Hirschfeld
+        f = open('input1','w')
+        f.write(inputtxt)
+        f.close()
+        com = 'multiwfn ' + resf + ' < input1 > '+outfile
+        tt = mybash(com)
+        os.remove('input1')
+        f = open(outfile,'r')
+        ss = f.read()
+        f.close()
+        s = find_between(ss,' of atom     1','Atomic dipole')
+        hirscht = [line for line in s.splitlines() if atoms['Fe'] in line]
+        hirsch = filter(None,hirscht[0].split(None))[-1]
+        os.remove(outfile)
+        inputtxt = '7\n2\n1\n' # VDD
+        f = open('input1','w')
+        f.write(inputtxt)
+        f.close()
+        com = 'multiwfn ' + resf + ' < input1 > '+outfile
+        tt = mybash(com)
+        os.remove('input1')
+        f = open(outfile,'r')
+        ss = f.read()
+        f.close()
+        s = find_between(ss,' of atom     1','Atomic dipole')
+        vddt = [line for line in s.splitlines() if atoms['Fe'] in line]
+        vdd = filter(None,vddt[0].split(None))[-1]
+        os.remove(outfile)
+        inputtxt = '7\n5\n1\n' # Mulliken
+        f = open('input1','w')
+        f.write(inputtxt)
+        f.close()
+        com = 'multiwfn ' + resf + ' < input1 > '+outfile
+        tt = mybash(com)
+        os.remove('input1')
+        f = open(outfile,'r')
+        ss = f.read()
+        f.close()
+        s = find_between(ss,'Population of atoms','Total net')
+        mullt = [line for line in s.splitlines() if '('+atoms['Fe'] in line]
+        mull = filter(None,mullt[0].split(None))[-1]
+        os.remove(outfile)
+        #inputtxt = '7\n6\n1\n' # Lowdin
+        #f = open('input1','w')
+        #f.write(inputtxt)
+        #f.close()
+        #com = 'multiwfn ' + resf + ' < input1 > '+outfile
+        #tt = mybash(com)
+        #os.remove('input1')
+        #f = open(outfile,'r')
+        #ss = f.read()
+        #f.close()
+        #s = find_between(ss,'Population of atoms','Total net')
+        #lowt = [line for line in s.splitlines() if '('+atoms['Fe'] in line]
+        #low = filter(None,lowt[0].split(None))[-1]
+        #os.remove(outfile)
+        print 'Hirshfeld:'+hirsch+' VDD:'+vdd+' Mulliken:'+mull
+        txt += resd.ljust(15)+hirsch.ljust(10)+vdd.ljust(10)+mull.ljust(10)+'\n'
+    f = open('charges_res.txt','w')
+    f.write(header+txt)
+    f.close()
+
+def deloc(folder,parse):
+    print "\n##################### Getting your results ######################\n\n"
+    # get results files
+    resfiles=mybash("find "+folder+" -name '*.molden' ")
+    resfiles=filter(None,re.split('\n',resfiles))
+    header = "\nFolder              No Attr     Loc-indx     Tot-Deloc\n"
+    header += "---------------------------------------------------------------------\n"
+    # loop over folders
+    resf = []
+    text = [] 
+    for numi,resf in enumerate(resfiles):
+        resd = resf.rsplit('/',2)[0]
+        resd = resd.split('/',1)[-1]
+        outfile = resd+'.txt'
+        print 'Processing ',resd
+        # get coordinates of metal
+        f = open(resf,'r')
+        sm = f.read().splitlines()
+        f.close()
+        ml = [line for line in sm if 'Fe' in line]
+        mll = filter(None,ml[0].split(None))
+        mcoords = [float(mll[3]),float(mll[4]),float(mll[5])]
+        # Run multiwfn 
+        if not glob.glob(outfile):
+            inputtxt = '17\n1\n1\n2\n4\n'
+            f = open('input0','w')
+            f.write(inputtxt)
+            f.close()
+            com = 'multiwfn ' + resf + ' < input0 > '+outfile
+            tt = mybash(com)
+            shutil.rmtree('input0')
+        if (parse):
+            # parse output
+            f = open(outfile,'r')
+            s = f.read()
+            f.close()
+            # get basins 
+            if ('The attractors after clustering' in s):
+                st = find_between(s,'Index      Average','The number')
+                sst = filter(None,st.splitlines()[1:])
+            else:
+                st = find_between(s,'Attractor','Detecting')
+                sst = filter(None,st.splitlines()[1:])
+            basidx = []
+            att_range = 1.0 # Angstrom 
+            for line in sst:
+                xyzcoords = line.split(None)
+                if (len(xyzcoords) > 3 ):
+                    xyzc = [float(xyzcoords[1]),float(xyzcoords[2]),float(xyzcoords[3])]
+                    if distance(mcoords,xyzc) < att_range :
+                        basidx.append(xyzcoords[0])
+            # get total number of basins
+            dd = int(find_between(s,'matrix for basin','...').split(None)[-1])
+            # get delocalization matrix
+            sdel = find_between(s,'Total delocalization index matrix','Total localization')
+            sdeloc = sdel.splitlines()[1:]
+            for bidx in basidx:
+                [a,b] = divmod(int(bidx)-1,5)
+                deloc = []
+                ll = sdeloc[a*(dd+1)+1:(a+1)*(dd+1)]
+                for ii,l in enumerate(ll):
+                    #if (ii!=int(bidx)-1):
+                    lf = filter(None,l.split(None))
+                    deloc.append(float(lf[b+1]))
+                # get localization index
+            s = find_between(s,'Total localization index:','==')
+            loc = []
+            for bidx in basidx:
+                ss = s.split(bidx+':')[-1]
+                ss = ss.split(None)
+                loc.append(float(ss[0]))
+            tdeloc = sum(deloc)
+            tloc = sum(loc)
+            tt = resd.ljust(22)+str(len(basidx)).ljust(6)+"{:10.3f}".format(tloc).ljust(14)+"{:10.3f}".format(tdeloc).ljust(10)+'\n'
+            text.append(tt)
+        # sort alphabetically and print
+        text=sorted(text)
+        f=open('results.txt','w')
+        f.write(header+''.join(text)) 
+    print "\n\n##################### Your results are ready ######################\n"
+
+
+if __name__ == '__main__':
+    args = sys.argv[1:]
+    if len(args)==0:
+        print "\nCalculates the delocalization index."
+        print "\nUsage: deloc <root folder>\n"
+        folder=raw_input("\nPlease enter jobs root folder: ")
+    else:
+        folder = args[0]
+    if ('-p') in args:
+        parse = True
+    else:
+        parse = False
+    if not os.path.isdir(folder):
+        print "Directory " + folder +" does not exist. Exiting.."
+    else:
+        deloc(folder,parse)
+        getcharge(folder)

@@ -1,0 +1,388 @@
+#!/usr/bin/env python
+'''
+Created on Nov 4, 2014
+
+@author: tim
+
+# Written by Tim Ioannidis Mar 12 2015 for HJK Group
+# Dpt of Chemical Engineering, MIT
+'''
+
+import subprocess
+import re
+import sys
+import os
+import time
+import shutil
+import smtplib
+from math import sqrt
+
+
+
+##########################################################
+########## This script post-processes the  ###############
+#######  results from terachem calculations  #############
+##########################################################
+
+# global dictionary of metals with atomic numbers
+metals = {'Sc':21,'Ti':22,'V':23,'Cr':24,'Mn':25,'Fe':26,'Co':27,'Ni':28,'Cu':29,
+          'Y':39,'Zr':40,'Nb':41,'Mo':42,'Tc':43,'Ru':44,'Rh':45,'Pd':46,'Pt':78,'Au':79,'In':49}
+
+# atoms dictionary contains atomic mass, atomic number, covalent radius
+amass = {'H':(1.0079,1,0.37),'C':(12.0107,6,0.77),'N':(14.0067,7,0.75),'O':(15.9994,8,0.73),'F':(18.9984,9,0.71),
+        'P':(30.9738,15,1.06),'S':(32.065,16,1.02),'Cl':(35.453,17,0.99),'Ti':(47.867,22,1.36),'Cr':(51.9961,24,1.27),
+        'Mn':(54.938,25,1.39),'Fe':(55.84526,26,1.25),'Ni':(58.4934,28,1.21),'Co':(58.9332,27,1.26),
+        'Cu':(63.546,29,1.38),'Zn':(65.39,30,1.31),'Br':(79.904,35,1.14)}
+
+def find_between(s, first, last ):
+    # returns string between first and last substrings
+    s=s.split(first)
+    s=s[1].split(last)
+    return s[0]
+
+def distance(R1,R2):
+    dx = R1[0] - R2[0] 
+    dy = R1[1] - R2[1] 
+    dz = R1[2] - R2[2] 
+    d = sqrt(dx**2+dy**2+dz**2)
+    return d
+
+def centermass(mol):
+    cm = [0.0,0.0,0.0]
+    mass = 0.0
+    for atom in mol:
+        mass += amass[atom[0]][0]
+        cm[0] += amass[atom[0]][0]*atom[1]
+        cm[1] += amass[atom[0]][0]*atom[2]
+        cm[2] += amass[atom[0]][0]*atom[3]
+    cm[0] /= mass
+    cm[1] /= mass
+    cm[2] /= mass
+    return cm
+
+def calcdist(xyzf,Nmol):    
+    #load file and convert to molecule
+    f = open(xyzf,'r')
+    t=f.read()
+    t = t.splitlines()
+    mol0 = []
+    mol1 = []
+    NoAtoms = int(t[0])
+    for i,line in enumerate(t[2:]):
+        l = line.split(None)
+        if (i<int(Nmol)):
+            mol0.append([l[0],float(l[1]),float(l[2]),float(l[3])])
+        else:
+            mol1.append([l[0],float(l[1]),float(l[2]),float(l[3])])
+    cm0 = centermass(mol0)
+    cm1 = centermass(mol1)
+    d=distance(cm0,cm1)
+    return d
+
+def getNat(xyzf):
+    #load file and convert to molecule
+    f = open(xyzf,'r')
+    t=f.read()
+    t = t.splitlines()
+    for i,line in enumerate(t[2:]):
+        l = line.split(None)
+        if l[0] in metals.keys():
+            break
+    return str(i)
+    
+
+
+def mybash(cmd):
+    p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    stdout = []
+    while True:
+        line = p.stdout.readline()
+        stdout.append(line)        
+        if line == '' and p.poll() != None:
+            break
+    return ''.join(stdout)
+
+def nbo_parser_unrestricted(s):
+    res = [] # list of output: [atom],[charge],[average % metal-centered hyb in NBOs],
+             # [average %d character in NBOs], [average LV orb occup], [average %d char in LVs]
+             # averages with respect to occupations 
+    ''' Charge parsing '''
+    # get nbo charge
+    scharge = s.split('Charge')[1].split('* Total *')[0]
+    scharge=scharge.splitlines()[2:-2] # get atoms and summary of NP analysis
+    # find metal charge
+    for line in scharge: # loop over atoms
+        if line.split(None)[0] in metals: # find metal in atoms
+            res.append(line.split(None)[0])
+            res.append(line.split(None)[2])
+    ''' NLMO %NBO parsing '''
+    # get metal d occupation
+    sstxt = find_between(s,'Natural Electron Configuration','********')
+    smet = find_between(sstxt,res[0],'\n')
+    doccup = find_between(smet,'3d(',')')
+    # get metal d-band center
+    sstxt = filter(None,find_between(s,'NATURAL POPULATIONS','Summary').splitlines())
+    dband = 0.0
+    for ll in sstxt:
+        la = filter(None,ll.split(None))
+        if len(la) > 4:
+            if(la[1]==res[0] and la[4]=='Val(' and la[5]=='3d)'):
+                dband += 0.2*float(la[7])
+    # split output for alpha beta electrons
+    salpha = s.split('Alpha spin orbitals')[1]
+    sbeta = salpha.split('Beta  spin orbitals')[1]
+    salpha = salpha.split('Beta  spin orbitals')[0]
+    # parse alpha
+    [alphares,aLV] = spinnbo(salpha,res[0]) # output list with [occup,%metal hyb,%d in metal hyb]
+    #anlmo = spinnlmo(salpha,res[0]) # output list with [occup,%metal hyb,%d in metal hyb]
+    anlmo = [0.0,0.0,0.0]
+    # parse beta
+    [betares,bLV] = spinnbo(sbeta,res[0]) # output list with [occup,%metal hyb,%d in metal hyb]
+    #bnlmo = spinnlmo(sbeta,res[0]) # output list with [occup,%metal hyb,%d in metal hyb]
+    bnlmo = [0.0,0.0,0.0]
+    # average results from alpha, beta
+    hyb = 0.0
+    dper = 0.0
+    occtot = 0.0
+    for entry in alphares:
+        hyb += float(entry[0])*0.01*float(entry[1])
+        dper += float(entry[0])*1e-4*float(entry[1])*float(entry[2])
+        occtot += float(entry[0])
+    for entry in betares:
+        hyb += float(entry[0])*0.01*float(entry[1])
+        dper += float(entry[0])*1e-4*float(entry[1])*float(entry[2])
+        occtot += float(entry[0])
+    # normalize with respect to total occupation
+    if occtot > 0:
+        res.append(hyb/occtot)
+        res.append(dper/occtot)
+    else:
+        res.append(0.0)
+        res.append(0.0)
+    if (anlmo[0]+bnlmo[0]) > 0 :
+        # combine nlmo data
+        nlmotot = (anlmo[1]+bnlmo[1])/(anlmo[0]+bnlmo[0])
+        res.append(nlmotot)
+    else:
+        res.append(0.0)
+    # normalize LVs
+    occlv = 0.0
+    lvdper = 0.0
+    for lv in aLV:
+        occlv += float(lv[0])
+        lvdper += 0.01*float(lv[0])*float(lv[1])
+    for lv in bLV:
+        occlv += float(lv[0])
+        lvdper += 0.01*float(lv[0])*float(lv[1])
+    if (occlv > 0.0):
+        res.append(occlv/(len(aLV)+len(bLV)))
+        res.append(lvdper/occlv)
+    else:
+        res.append(0.0)
+        res.append(0.0)
+    return res,doccup,dband
+    
+def nbo_parser_restricted(s):
+    res = [] # list of output: [atom],[charge],[average % metal-centered hyb in NBOs],
+             # [average %d character in NBOs]
+             # averages with respect to occupations 
+    ''' Charge parsing '''
+    # get nbo charge
+    scharge = s.split('Charge')[1].split('* Total *')[0]
+    scharge=scharge.splitlines()[2:-2] # get atoms and summary of NP analysis
+    # find metal charge
+    for line in scharge: # loop over atoms
+        if line.split(None)[0] in metals: # find metal in atoms
+            res.append(line.split(None)[0])
+            res.append(line.split(None)[2])
+    ''' NLMO %NBO parsing '''    
+    [totres,tLV] = spinnbo(s,res[0]) # output list with [occup,%metal hyb,%d in metal hyb]    
+    nlmores = spinnlmo(s,res[0]) # output list with [occup,%metal hyb,%d in metal hyb]    
+    # average results from alpha, beta
+    hyb = 0.0
+    dper = 0.0
+    occtot = 0.0
+    for entry in totres:
+        hyb += float(entry[0])*0.01*float(entry[1])
+        dper += float(entry[0])*1e-4*float(entry[1])*float(entry[2])
+        occtot += float(entry[0])
+    # normalize with respect to total occupation
+    res.append(hyb/occtot)
+    res.append(dper/occtot)
+    res.append(0.01*nlmores[1]/nlmores[0])
+    return res
+    
+def spinnbo(s,metal):
+    sNBO = []
+    sLV = []
+    # get molecular orbitals containing metal
+    ss = s.split('NATURAL BOND ORBITAL ANALYSIS')
+    slines = ss[1].split('NHO DIRECTIONALITY AND BOND BENDING')[0].splitlines()
+    for i,line in enumerate(slines):
+        if ((metal in line) and ('BD' in line)):
+            # get NBO occupation
+            occup = find_between(line.split(None)[1],'(',')')
+            # get block of NBO
+            no=line.split(None)[0].strip(' ')
+            # join rest of text to search
+            ttt = ''
+            for lt in slines[i:i+20]:
+                ttt+= lt + '\n'
+            # find metal centered hybrid inside NBO block
+            sa = find_between(ttt,no+' (',str(int(no[0:2])+1)+'. (').splitlines()
+            ml = [ll for ll in sa[1:] if metal in ll] # metal centered hybrid
+            if len(ml) > 0:
+                perhyb = find_between(ml[0],'(','%').strip(' ') # get % of metal hyb in NBO                
+                perds = ml[0].rsplit('(',1)
+                perd = perds[-1].split('%)')[0] # get d orbital character
+                # append result
+                sNBO.append([occup,perhyb,perd])
+        if ((metal in line) and ('LV' in line)):
+            # get LV occupation
+            occup = find_between(line.split(None)[1],'(',')')
+            # get d-orbital character
+            perds = line.rsplit('(',1)
+            perd = perds[-1].split('%)')[0] # get d orbital character
+            sLV.append([occup,perd])
+    return [sNBO,sLV]
+
+def spinnlmo(s,metal):
+    # get NLMOs containing metal
+    ss = s.split('NATURAL LOCALIZED MOLECULAR ORBITAL (NLMO) ANALYSIS')[1].splitlines()    
+    nlmoccup = 0.0
+    pernlmo = 0.0
+    for line in ss:
+        if ((metal in line) and ('BD' in line)):
+            # get NBO occupation
+            nlmoccup += float(find_between(line.split(None)[1],'(',')').strip(' '))
+            # get %NBO in NLMO
+            pernlmo += 0.01*float(find_between(line,')','%').strip(' '))
+    nlmo = [nlmoccup, pernlmo]
+    return nlmo
+    
+
+
+def nbo_terachem(folder,t,prefix,Nat):
+    print "\n##################### Getting your results ######################\n\n"
+    # get results files
+    resfiles=mybash("find "+folder+" -name '*.out' ")
+    resfiles=filter(None,re.split('\n',resfiles))
+    header="Date: " +  t+ "\nHi Tim, here are the current results for runs in folder '"+folder+"'\n"
+    header += "\nCompound    Method  %HF  Restricted  Optim  Converged  Spin  S^2   Charge    Energy(au)   Distance(A)    Time(s)\n"
+    header += "----------------------------------------------------------------------------------------------------------------------\n"
+    headern="Date: " +  t+ "\nHi Tim, here are the current results for runs in folder '"+folder+"'\n"
+    headern += "\nCompound               Method  %HF  Restr  Spin  Charge   Metal  MCharge  AvhybNBO  AvDorbNBO   AvNLMO   AvLV    AvDorbLV   Doccup    Dband-center\n"
+    headern += "------------------------------------------------------------------------------------------------------------------------------------------------------\n"
+    # loop over folders
+    resf = []
+    text = [] 
+    textnbo = []
+    for numi,resf in enumerate(resfiles):
+        resd = resf.rsplit('/',1)[0]
+        print 'Processing ',resf
+        nboan = False
+        with open(resf) as f:
+            s = f.read()
+            f.close()
+        # split output into terachem and nbo parts
+        sp = s.split('Launch NBO6 analysis...')
+        stera = sp[0] # get tera output
+        if len(sp)>1:
+            snbo = s.split('Launch NBO6 analysis...')[1]  # get nbo output
+            nboan = True
+        ''' Parse terachem output '''
+        ss = stera.splitlines()
+        # get simulation parameters
+        comp = [line for line in ss if 'XYZ coordinates' in line][0].rsplit(None,1)[-1]
+        comp = comp.split('.xyz')[0] # compound name
+        spin = [line for line in ss if 'Spin multiplicity:' in line][0].rsplit(None,1)[-1] # spin mult
+        ssq = filter(None,[line for line in ss if 'SPIN S-SQUARED' in line])# SPIN S-SQUARED
+        if (len(ssq)>0):
+            ssqs=filter(None,ssq[-1].split(')'))
+            ssq = ssqs[-1].split(None)[-1]
+        else:
+            ssq = 'NA'
+        tcharge = [line for line in ss if 'Total charge:' in line]
+        if len(tcharge)>0:
+            tcharge=tcharge[0].rsplit(None,1)[-1] # total charge
+        else:
+            tcharge = 'ERROR'
+        UR = [line for line in ss if 'Wavefunction:' in line][0].rsplit(None,1)[-1][0] # U/R (Un)restricted
+        smethod = [line for line in ss if 'Method:' in line][0].split(None) # functional
+        method = smethod[1]
+        if (smethod[-2]=='dispersion'):
+            method += '-D'
+        hfx = [line for line in ss if 'Hartree-Fock exact exchange:' in line][0].rsplit(None,1)[-1] # HFX
+        optim = [line for line in ss if 'RUNNING GEOMETRY' in line] # optimization?
+        optim = 'Y' if len(optim)>0 else 'N'
+        # get results
+        en = [line for line in ss if 'FINAL ENERGY:' in line] # energy
+        en = en[-1].rsplit(None,2)[-2] if len(en)>0 else 'NaN'        
+        conv = 'NA'
+        if (optim=='Y'):
+            conv = [line for line in ss if 'Converged!' in line]
+            conv = 'Y' if len(conv)>0 else 'N'
+        else:
+            conv ='NA'
+        timet = [line for line in ss if 'Total processing time:' in line]
+        if (len(timet) > 0 ):
+            time = timet[0].rsplit(None,2)[-2]
+        else:
+            time = 'NOT DONE'
+        # construct string record of results
+        tt = comp.ljust(12)+method.ljust(7)+("{:3.0f}".format(100*float(hfx))+'%').ljust(10)+UR.ljust(10)+optim.ljust(8)+conv.ljust(9)+spin.ljust(5)+ssq.ljust(9)
+        Natom = Nat if Nat > 0 else getNat(resd+'/'+comp+'.xyz')
+        if (Natom>0):
+            d = calcdist(resd+'/'+comp+'.xyz',Natom)
+            tt += tcharge.ljust(6)+"{:10.6f}".format(float(en)).ljust(13)+"{:10.5}".format(d).ljust(16)+time+'\n'
+        else:
+            tt += tcharge.ljust(6)+"{:10.6f}".format(float(en)).ljust(18)+'     NA         '+time+'\n'
+        text.append(tt)
+        ''' Parse NBO output '''
+        if (nboan):
+            if (UR=='U'):
+                nbores,doccup,dband = nbo_parser_unrestricted(snbo)
+            else:
+                nbores = nbo_parser_restricted(snbo)
+            # write NBO result entry
+            tt = comp.ljust(24)+method.ljust(7)+("{:3.0f}".format(100*float(hfx))+'%').ljust(8)+UR.ljust(6)+spin.ljust(7)+tcharge.ljust(8)
+            tt += nbores[0].ljust(6)+"{:6.4f}".format(float(nbores[1])).ljust(10)+"{:6.4f}".format(nbores[2]).ljust(10)
+            tt += "{:6.4f}".format(nbores[3]).ljust(10)+"{:6.5f}".format(nbores[4]).ljust(9)+"{:6.5f}".format(nbores[5]).ljust(9)+"{:6.5f}".format(nbores[6]).ljust(12)
+            tt += "{:4.2f}".format(float(doccup)).ljust(10)+"{:4.2f}".format(dband).ljust(10)+'\n'
+            textnbo.append(tt)
+    # sort alphabetically and print
+    text=sorted(text)
+    f=open(prefix+'results.txt','w')
+    f.write(header+''.join(text)) 
+    textnbo=sorted(textnbo)
+    f=open(prefix+'nbo.txt','w')
+    f.write(headern+''.join(textnbo))
+    if (Nat > 0 ):
+        print "\nYou might want to update xyz files by running <update_guess> if you performed optimizations.Just saying.."
+    print "\n\n##################### Your results are ready ######################\n"
+
+
+if __name__ == '__main__':
+    args = sys.argv[1:]
+    t=time.strftime('%c')
+    prefix = ''
+    Nat = 0 
+    if len(args)==0:
+        print "\nUsage: terapost <root folder> <results-prefix> <-dist> <NoAtoms>\n"
+        folder=raw_input("\nPlease enter jobs root folder: ")
+    elif len(args)==1:
+	folder = args[0]
+    elif len(args)==2:
+        folder = args[0]
+        prefix = args[1]+'-'
+    elif len(args)==3:
+        folder = args[0]
+        Nat = int(args[args.index('-dist')+1])
+    elif len(args)==4:
+        folder = args[0]
+        prefix = args[1]+'-'
+        Nat = int(args[args.index('-dist')+1])
+    if not os.path.isdir(folder):
+        print "Directory " + folder +" does not exist. Exiting.."
+    else:
+        nbo_terachem(folder,t,prefix,Nat)

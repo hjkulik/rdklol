@@ -20,6 +20,7 @@ import argparse
 import sys
 
 def parseinput(args):
+    args.ox = 0
     for line in open(args.infile):
         li = line.strip()
         if not li.startswith("#") and len(li)>0: # remove comments/empty lines
@@ -47,20 +48,29 @@ def parseinput(args):
                 args.maxd = l[1]
             if (l[0]=='-mind'):
                 args.mind = l[1]
+            if (l[0]=='-coord'):
+                args.coord = l[1]
             if (l[0]=='-lig'):
                 args.lig = [ll.lower() for ll in l[1:]]
             if (l[0]=='-ligocc'):
                 args.ligocc = l[1:]
+            if (l[0]=='-dispersion'):
+                args.dispersion = l[1].strip('\n').lower()
             if (l[0]=='-rgen'):
                 args.rgen = l[1:]
             if (l[0]=='-suff'):
                 args.suff = l[1].strip('\n')
-            if (l[0]=='-dispersion'):
-                args.dispersion = l[1].strip('\n').lower()
             if (l[0]=='-rdir'):
                 args.rundir = l[1].strip('\n')
                 if (args.rundir[-1]=='/'):
                     args.rundir = args.rundir[:-1]
+            if (l[0]=='-ff'):
+                args.ff = l[1].lower()
+            if (l[0]=='-ox'):
+                args.ox = int(l[1])
+            if (l[0]=='-post'):
+                args.postp = True
+                
 
 def parsecommandline(parser,installdir):
     parser.add_argument("-i","--infile",help="specified in input file")
@@ -68,6 +78,8 @@ def parsecommandline(parser,installdir):
     parser.add_argument("-a","--anion", help="anion type with currently available: "+getanions(installdir)) #e.g. bisulfate, nitrate, perchlorate -> For binding
     parser.add_argument("-na","--anionsnum", help="number of anion copies") #different geometric arrangements for calculating binding energy
     parser.add_argument("-lig","--lig", help="ligand structure name with currently available: "+getligs(installdir)) #e.g. acetate (in smilesdict) -> Functionalize ferrocene
+    parser.add_argument("-ligocc","--ligocc", help="number of corresponding ligands") # e.g. 1,2,1
+    parser.add_argument("-coord","--coord", help="Coordination such as 4,5,6") # coordination e.g. 6 (octahedral)
     parser.add_argument("-rgen","--rgen", help="number of random generated molecules, overwrites lig and ligcorr")
     parser.add_argument("-smi","--smiles", help="(optional) manual SMILES string") #e.g 'O=C[O-]'
     parser.add_argument("-dbq","--dbquery", help="(optional) database to query") #database to query
@@ -77,12 +89,15 @@ def parsecommandline(parser,installdir):
     parser.add_argument("-maxd","--maxd", help="Maximum distance above cluster size for molecules placement maxdist=size1+size2+maxd", action="store_true")
     parser.add_argument("-mind","--mind", help="Minimum distance above cluster size for molecules placement mindist=size1+size2+mind", action="store_true")
     parser.add_argument("-rdir","--rundir",help="Directory for jobs",action="store_true")
+    parser.add_argument("-ff","--ff",help="Force field optimize ligands",action="store_true")
+    parser.add_argument("-postp","--postp",help="Post process results",action="store_true")
     # terachem arguments    
     parser.add_argument("-xyz","--xyzfile", help="Input file")
     parser.add_argument("-m","--method", help="electronic structure approach for terachem job. Specify UHF/UDFT to enforce levelshifting and unrestricted calculation for OS singlets (default: b3lyp).")
     parser.add_argument("-b","--basis", help="basis for terachem job (default: LACVP*).") 
     parser.add_argument("-s","--spin", help="spin for system (default: singlet).")
     parser.add_argument("-ch","--charge", help="charge for system (default: neutral).") 
+    parser.add_argument("-ox","--ox", help="oxidation state for metal (default: neutral).") 
     parser.add_argument("-x","--extra", nargs="+", help="extra arguments in syntax tckeyword=value. suggestions: nstep (opt), maxit (scf), scf=diis+a, min_tolerance>4.5e-4/min_tolerance_e>1.0e-6, min_coordinates=cartesian, orbitalswrtfrq=<num>,multibasis=<basis file>.")
     parser.add_argument("-tc","--terachem", help="full path to custom terachem installation.")
     # jobscript arguments
@@ -165,12 +180,13 @@ def core_load(installdir,userinput,mcores):
     else:
         # load core mol file (without hydrogens)
         core=Chem.MolFromMolFile(installdir+'Cores/'+mcores[userinput][0],removeHs=False)
-        core.cg=mcores[userinput][1]
-        core.cat = [int(l) for l in filter(None,mcores[userinput][2:])]
+        core.cg=mcores[userinput][0]
+        core.cat = [int(l) for l in filter(None,mcores[userinput][1:])]
     return core
     
 def lig_load(installdir,userinput,licores):
     userinput = userinput.split('.mol')[0] 
+    userinput = userinput.split('.xyz')[0] 
     if userinput not in licores:
         print("We didn't find the ligand structure: %s in the dictionary. Try again!\nAvailable ligands are:%s\n" %(userinput,getligs(installdir)))
         exit()
@@ -179,8 +195,17 @@ def lig_load(installdir,userinput,licores):
         exit()
     else:
         # load lig mol file (with hydrogens)
-        lig=Chem.MolFromMolFile(installdir+'Ligands/'+licores[userinput][0],removeHs=False)
-        lig.cat = [int(l) for l in licores[userinput][1:]]
+        flig = installdir+'Ligands/'+licores[userinput][0]
+        lig = Chem.Mol()
+        if ('.xyz' in flig):
+            lig.f=flig
+            lig.mol = False
+        elif ('.mol' in flig):
+            lig=Chem.MolFromMolFile(flig,removeHs=False)
+            lig.mol = True
+        lig.cat = [int(l) for l in licores[userinput][2:]]
+        lig.charge = int(licores[userinput][1])
+        lig.denticity = len(licores[userinput][2:])
     return lig
 
 def anion_load(installdir,userinput,ancores):
@@ -191,6 +216,7 @@ def anion_load(installdir,userinput,ancores):
     else:
         # load anion mol file (without hydrogens)
         anion=Chem.MolFromMolFile(installdir+'Anions/'+userinput,removeHs=False)
+        anion.charge = -1
     return anion   
     
     

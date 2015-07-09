@@ -1,0 +1,235 @@
+#!/usr/bin/python
+'''
+Created on Nov 4, 2014
+
+@author: tim
+'''
+import subprocess
+import re
+import sys
+import os
+import time
+import math
+from scipy.integrate import simps
+from numpy.linalg import norm
+
+class AtomClass:
+  typ = '' # type
+  ID = '0' # molden id
+  nel = '0' # number of electrons
+  xyz = ['0.0','0.0','0.0']
+  # number of s,p,d primitives | number of s,p,d and total shells, primitives
+  ns,np,nd,nsc,npc,ndc,totc = (0,)*7
+
+def mybash(cmd):
+    p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    stdout = []
+    while True:
+        line = p.stdout.readline()
+        stdout.append(line)
+        if line == '' and p.poll() != None:
+            break
+    return ''.join(stdout)
+
+
+def findbetween(s, first, last ):
+    # returns string between first and last substrings
+    s=s.split(first)
+    if len(s) > 1:
+        s=s[1].split(last)
+        return s[0]
+    else:
+        return ""
+
+def getrange(idx,atoms):
+    totc = 0 
+    for i in range(0,idx):
+        totc += (atoms[i].nsc+atoms[i].npc*3+atoms[i].ndc*6)
+    totc += 1 # start index at 1 instead of 0 to compare with molden
+    return [totc,totc+atoms[idx].nsc,totc+atoms[idx].nsc+atoms[idx].npc*3]
+    
+def parse(molf):
+    # get coordinates of metal
+    f = open(molf,'r')
+    sm = f.read().splitlines()
+    f.close()
+    ml = [line for line in sm if 'Fe' in line]
+    mll = filter(None,ml[0].split(None))
+    atidx = int(mll[1])-1
+    # INITIALIZE VARIABLES
+    natoms = 0 
+    # read molden file
+    f=open(molf,'r')
+    s=f.read()
+    f.close()
+    ###################################
+    ####### PARSE MOLDEN FILE #########
+    ###################################
+    # Get atoms
+    atoms = [] # Type, ID, num electrons, x, y, z
+    satoms = findbetween(s,'[Atoms]','[GTO]').splitlines()[1:]
+    for line in satoms:
+        natoms += 1
+        ll = filter(None,line.split(None))
+        atom = AtomClass()
+        atom.typ = ll[0]
+        atom.ID = ll[1]
+        atom.nel = ll[2]
+        atom.xyz = ll[3:]
+        atoms.append(atom)
+    # Parse basis set
+    sgto = filter(None,findbetween(s,'[GTO]','[MO]').splitlines())
+    sgto.append('END') # for final termination
+    cl = 1 
+    print "Parsing "+molf.split('.molden')[0]+' ..\n'
+    ###################################
+    ########### GET SHELLS  ###########
+    ###################################
+    totshells = 0 
+    for noatom in range(0,natoms): # loop over atoms
+        # skip first line
+        while(True):
+            l = filter(None,sgto[cl].split(None))
+            if len(l) > 0:
+                if (l[0]=='s' or l[0]=='S'): # get shell type
+                    atoms[noatom].ns = int(l[1]) # number of primitives
+                    atoms[noatom].nsc += 1 # total number of s-type shells
+                    atoms[noatom].totc += 1  
+                    cl += atoms[noatom].ns+1
+                elif (l[0]=='p' or l[0]=='P'):
+                    atoms[noatom].np = int(l[1])
+                    atoms[noatom].npc += 1
+                    atoms[noatom].totc += 3 # px,py,pz for each p shell
+                    cl += atoms[noatom].np+1
+                elif (l[0]=='d' or l[0]=='D'):
+                    atoms[noatom].nd = int(l[1])
+                    atoms[noatom].ndc += 1
+                    cl += atoms[noatom].nd+1
+                    atoms[noatom].totc += 6 # dxx,dyy,dzz,dxy,dyz,dzx for each d shell
+                else:
+                    cl += 1
+                    break
+        totshells += atoms[noatom].totc
+    ###################################
+    ############ GET INFO  ############
+    ###################################
+    # get range of AO for atom of interest
+    [sidx,pidx,didx] = getrange(atidx,atoms)
+    S = [sidx,sidx+atoms[atidx].nsc-1] # range of S AOs
+    P = [S[1]+1,S[1]+atoms[atidx].npc*3] # range of P AOs
+    D = [P[1]+1,P[1]+atoms[atidx].ndc*6] # range of D AOs
+    smos = filter(None,s.split('Ene')[1:])
+    # loop over MOs
+    txt=''
+    header = 'MO   Energy  Spin Occup S-char  P-char  D-char\n'
+    eldic = {'Alpha':0,'Beta':0}
+    totscoeffs = 0.0
+    totpcoeffs = 0.0
+    totdcoeffs = 0.0
+    scenter = 0.0
+    pcenter = 0.0
+    dcenter = 0.0
+    ehomo = -999.0
+    elumo = 10000.0
+    e0 = 10000.0
+    for i,ss in enumerate(smos) :
+        lines = filter(None,ss.split('\n'))
+        AOs = filter(None,lines[3:])[:-1]
+        occ = float(lines[2].split(' ')[2])
+        en = float(lines[0].split(None)[-1])
+        spin = lines[1].split(' ')[2]
+        eldic[spin] += 1
+        coeffs = 0 
+        scoeffs = 0 
+        pcoeffs = 0 
+        dcoeffs = 0
+        if (occ > 0.0 and en > ehomo):
+            ehomo = en 
+        if (occ > 0.0 and en < e0):
+            e0 = en 
+        if (occ < 1.0 and en < elumo):
+            elumo = en 
+        if len(AOs) > 0 :
+            for AO in AOs:
+                cof = [int(filter(None,AO.split(' '))[0]),float(filter(None,AO.split(' '))[1])]
+                coeffs += cof[1]*cof[1]
+                if S[0] <= cof[0] <= S[1]:
+                    scoeffs += cof[1]*cof[1]
+                elif P[0] <= cof[0] <= P[1]:
+                    pcoeffs += cof[1]*cof[1]
+                elif D[0] <= cof[0] <= D[1]:
+                    dcoeffs += cof[1]*cof[1]
+            if (coeffs > 0):
+                scoeffs /= coeffs
+                pcoeffs /= coeffs
+                dcoeffs /= coeffs
+            # total s coeffs in MOs
+            # calculate s,p,d-band center
+            scenter += en*scoeffs
+            totscoeffs += scoeffs
+            pcenter += en*pcoeffs
+            totpcoeffs += pcoeffs
+            dcenter += en*dcoeffs
+            totdcoeffs += dcoeffs
+            if (scoeffs + pcoeffs + dcoeffs > 0.05 ):
+                tstr = str(eldic[spin]).ljust(4)+"{0:.3f}".format(en).ljust(10)+ spin[0].lower().ljust(5) +str(int(occ)).ljust(4)
+                tstr += ("{0:.1f}".format(100*scoeffs)+'%').ljust(8)+("{0:.1f}".format(100*pcoeffs)+'%').ljust(8)+("{0:.1f}".format(100*dcoeffs)+'%').ljust(8)
+                txt += tstr + '\n'
+    if (totscoeffs > 0):
+        scenter /= totscoeffs
+    if (totpcoeffs > 0):
+        pcenter /= totpcoeffs
+    if (totdcoeffs > 0):
+        dcenter /= totdcoeffs
+    sumtxt = 'S-center  P-center  D-center (Over occ and unocc MOs)\n'
+    sumtxt += "{0:.3f}".format(scenter).ljust(10)+"{0:.3f}".format(pcenter).ljust(10)+"{0:.3f}".format(dcenter).ljust(10)
+    outtxt = sumtxt+'\n\n'+header+txt
+    resdd = molf.split('/')
+    resd = [f for f in resdd if '.' not in f]
+    if (resd):
+        if len(resd)>1:
+            outfile = resd[-2]
+        elif len(resd)>0: 
+            outfile = resd[0]
+    else:
+        outfile = 'res'
+    f=open(outfile+'_orbs.txt','w')
+    f.write(outtxt)
+    f.close()
+    efermi = 0.5*(ehomo+elumo)
+    return [dcenter,ehomo,elumo,efermi]
+    
+def getres(dirf):
+    # get results files
+    resfiles=mybash("find "+dirf+" -name '*.molden' ")
+    resfiles=filter(None,re.split('\n',resfiles))
+    text = 'Filename             d-band      homo       lumo        fermi\n'
+    text += '------------------------------------------------------------\n'
+    for resf in resfiles:
+        resdd = resf.split('/')
+        resd = [f for f in resdd if '.' not in f]
+        text += resd[0].ljust(15)+'     '
+        rr = parse(resf)
+        text += "{0:.3f}".format(rr[0]).ljust(10)+"{0:.3f}".format(rr[1]).ljust(10)+"{0:.3f}".format(rr[2]).ljust(10)+"{0:.3f}".format(rr[3]).ljust(10)+'\n'
+    f = open('dband.txt','w')
+    f.write(text)
+    f.close()
+
+if __name__ == '__main__':
+    args = sys.argv[1:]
+    usage = """    
+    Usage:
+    moldparse <directory>
+"""
+    if len(args)<1:
+        print usage
+        sys.exit(0)
+    else:
+        inputf = args[0]
+        while not os.path.isdir(inputf): 
+            inputf=raw_input("Directory "+inputf+" does not exist. Please enter a valid path: ")
+    getres(inputf)
+
+
+
+

@@ -1,17 +1,20 @@
-acetonitrile:acetonitrile.mol,1
-amine:amine.mol,0
-ammonia:ammonia.mol,0
-benzene:benzene.mol,4
-bipy:bipy.mol,0 1
-carbonyl:carbonyl.mol,0
-cyanide:cyanide.mol,0
-ethyl:ethyl.mol,1
-hydroxyl:hydroxyl.mol,0
-methyl:methyl.mol,0
-nitro:nitro.mol,1
-PPh3:PPh3.mol,2
-pyridine:pyridine.mol,3
-terpy:terpy.mol,0 1 2
-thiocyanate:thiocyanate.mol,1
-water:water.mol,0
-x:x.mol,0
+acetonitrile:acetonitrile.mol,0,1
+amine:amine.mol,0,0
+ammonia:ammonia.mol,0,0
+benzene:benzene.mol,0,4 
+bpabipy:BPAbipy.xyz,0,0 13 26 48 30
+bipy:bipy.mol,0,0 1
+carbonyl:carbonyl.mol,0,0
+cyanide:cyanide.mol,-1,0
+edta:edta.xyz,0,0 1 2 3 4 5
+ethyl:ethyl.mol,0,1
+hydroxyl:hydroxyl.mol,-1,0
+methyl:methyl.mol,0,0
+nitro:nitro.mol,-1,1
+pph3:PPh3.mol,0,2
+pyridine:pyridine.mol,0,3
+terpy:terpy.mol,0,0 1 2
+thiocyanate:thiocyanate.mol,-1,1
+tpp:tpp.mol,0,0 1 2 3
+water:water.mol,0,0
+x:x.mol,0,0
